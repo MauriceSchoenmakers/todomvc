@@ -67,23 +67,19 @@ What we hope to achieve and why
 
 Can we measure this, could we make experiments that prove this...?
 
-A first benchmark with https://github.com/MauriceSchoenmakers/todomvc-perf.git 
-reveals our approach is not so bad, adding 5000 items :)
-
+A first benchmark with https://github.com/MauriceSchoenmakers/todomvc-perf.git
+reveals our approach is not sooo bad, adding 5000 items.
 ````
-Mercury (thunks) : Adding5000Items : Async: 1995.7820000126958 ms
-Mercury (thunks) : CompletingAllItems : Async: 2043.3239999692887 ms
-Mercury (thunks) : DeletingAllItems : Async: 1921.614000108093 ms
-Mercury (thunks) : 5960.7200000900775 ms
-Mithril : Adding5000Items : Async: 1705.0369998905808 ms
-Mithril : CompletingAllItems : Async: 2133.5710000712425 ms
-Mithril : DeletingAllItems : Async: 2058.0460000783205 ms
-Mithril : 5896.654000040144 ms
-f : Adding5000Items : Async: 1932.1239998098463 ms
-f : CompletingAllItems : Async: 1758.4270001389086 ms
-f : DeletingAllItems : Async: 2045.236999867484 ms
-f : 5735.787999816239 ms
+2 runs average:
+{
+    "Backbone": 1503263.7014999054,
+    "Mercury (thunks)": 9745.703499764204,
+    "Mithril": 7168.190999771468,
+    "f": 88826.65850000922
+}
 ````
+Look for the real dom updating just on raf? Take a look on flame
+graphs...
 
 
 
@@ -108,10 +104,10 @@ MISSING MVC
       - this is the result of mapping everything in a single pipeline
       - could be solved by splitting pipelines (tried this for counting but became also complex) 
       - injecting features into pipelines as a way of pipeline composition
-      		-> this could also improve testability of each feature
+        -> this could also improve testability of each feature
   - some stuff was added at the end like stats/footer rendering and filtering todos
-    - so it was done for each action even if 'model' didn't change ->
-    
+    - so it was done for each action even if 'model' didn't change
+
 
 SURPRISES
 
@@ -206,17 +202,8 @@ dom/browser (state)                                 model (state)               
 
 MVC as a pattern tries to make it easier to model the system state by a coarse state separation in model and views. However the multiple control flows and underspecified messaging semantics make every implementation more or less unique. Especially when a framework handles all these communications and its corner cases then specific code in models, views are tied to that framework and it concepts. This reduces reusability and composability.
 
-We argue that what finally is important is only an always correct dom state, after an sequence of input events from the outside : the user or backend/systems.  
+We argue that what finally is important is only an always correct dom state, after an sequence of input events from the outside : the user or backend/systems.
 
 All intermediate state representations are just helpers and optional. To reduce overall complexity it is crucial to have a simple uniform control flow and to reduce the number of state representations.
 
 Our streaming approach is more about transforming input messages to output messages, in a side effect free transition in multiple isolated steps. The emphasis lies on the (functional) transformation steps, not on the (object) state modelling.
-
-
-
-
-
-
-
-
-

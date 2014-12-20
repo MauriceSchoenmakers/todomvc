@@ -72,18 +72,20 @@ var todo = {
 			},
 			
 			toggle : function(element,prop,name,inverse){
-				var toggle_element = function(set){
-					return function(el){
-						var cl=(el.getAttribute('class')||'').split(/\s+/), i=cl.indexOf(name);
-						     if ( set && !~i) el.setAttribute('class', cl.concat(name).join(' '));
-						else if (!set &&  ~i) el.setAttribute('class', (cl.splice(i,1),cl).join(' '));
-					};
-				};
+				var
+					l=name.length,
+					toggle_class = function(set,el){
+						var cl=(el.className||''), i=cl.indexOf(name);
+						     if ( set && !~i) el.className = cl+' '+name;
+						else if (!set &&  ~i) el.className = cl.substring(0,i)+cl.substring(i+l);
+					},
+					add_class    = toggle_class.bind(null,!inverse ), // flip meaning based on inverse
+					remove_class = toggle_class.bind(null,!!inverse);
+				
 				return function(m){
 					if(!m[element] || (!(prop in m) && prop!==true && prop!==false)) return m;
 					var set = typeof(prop)==='string'? m[prop] : prop;
-					set = inverse ? !set  : !!set;
-					var f = toggle_element(set), el=m[element];
+					var f = set ? add_class : remove_class, el=m[element];
 					if(el.item) Array.prototype.forEach.call(el,f); else f(el);
 					return m;
 				};

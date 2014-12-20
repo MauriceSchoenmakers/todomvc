@@ -1,9 +1,5 @@
 'use strict';
 
-// DEBUGGER IDE SUPPORT
-var debug = function(m){debugger;return m;};
-
-
 // QUERY
 // on the first dom query we create a clone of the body if not already done...
 
@@ -116,20 +112,18 @@ var todo = {
 			},
 			
 			toggle : function(element,prop,name,inverse){
-				var
-					l=name.length,
-					toggle_class = function(set,el){
-						var cl=(el.className||''), i=cl.indexOf(name);
-						     if ( set && !~i) el.className = cl+' '+name;
-						else if (!set &&  ~i) el.className = cl.substring(0,i)+cl.substring(i+l);
-					},
-					add_class    = toggle_class.bind(null,!inverse ), // flip meaning based on inverse
-					remove_class = toggle_class.bind(null,!!inverse);
-				
+				var toggle_element = function(set){
+					return function(el){
+						var cl=(el.getAttribute('class')||'').split(/\s+/), i=cl.indexOf(name);
+						     if ( set && !~i) el.setAttribute('class', cl.concat(name).join(' '));
+						else if (!set &&  ~i) el.setAttribute('class', (cl.splice(i,1),cl).join(' '));
+					};
+				};
 				return function(m){
 					if(!m[element] || (!(prop in m) && prop!==true && prop!==false)) return m;
 					var set = typeof(prop)==='string'? m[prop] : prop;
-					var f = set ? add_class : remove_class, el=m[element];
+					set = inverse ? !set  : !!set;
+					var f = toggle_element(set), el=m[element];
 					if(el.item) Array.prototype.forEach.call(el,f); else f(el);
 					return m;
 				};
@@ -266,6 +260,11 @@ var todo = {
 				if (completed !== void 0) m.completed = completed;
 				return m;
 			},
+			title: function(m){
+				var op = m.operation, body = op ? op.body : null, title = body ? body.title : void 0;
+				if (title !== void 0) m.title = title;
+				return m;
+			},
 			
 			put: {
 				completed: function(m){
@@ -347,29 +346,46 @@ location.href = location.pathname+'#/'+todo.frontend.filter.value;
 
 // FRAMEWORK
 var pipeline = {
+	debug : function(msg){ var f = function(m){ console.log(msg + ':' + m ); }; f.debug=true; return f;},
 	
-	and : function (pipeline){
-		return function(m){
-			for(var i=0,l=pipeline.length;i<l;i++){
-				var f=pipeline[i];
-				m=f(m);
-				if(m === void 0) return ;
-			}
-			return m;
-		};
-	},
-	
-	or : function (pipeline){
-		return function(m){
-			for(var i=0,l=pipeline.length;i<l;i++){
-				var f=pipeline[i];
-				var r=f(m);
-				if(r !== void 0) return r;
-			}
-			return;
+	call: function (and,array){
+		var self=this;
+		
+		return function(m,cb){
+			m = m || {};
+			
+			if(m.error){ cb && cb(m.error,m); return; }
+			
+			var i=0,l=array.length;
+			(function next(){
+				if(i>=l){ cb && cb(null,m); return; }
+				
+				var f=array[i++];
+				
+				if(f.debug){ f(m); debugger; next(); return; }
+				
+				if(f.length===1) f = (function(f){ return function(m,f_cb){ m=f(m); f_cb(null,m); }; })(f);
+				
+				try {
+					f(m,function(err,m){
+						if(err && !(m && m.error)){
+							m = m || {};
+							m.error = err;
+						}
+						if( ( and ? m !== void 0 : m === void 0) && !m.error) next();
+						else cb && cb( m ? m.error : null,m);
+					});
+				} catch(err) {
+					m.error = err;
+					cb && cb(m.error,m);
+				}
+			})();
 		};
 	}
 };
+
+pipeline.and = pipeline.call.bind(pipeline,true);
+pipeline.or  = pipeline.call.bind(pipeline,false);
 
 var ui = todo.frontend;
 var db = todo.backend;
@@ -380,6 +396,7 @@ var db = todo.backend;
 ui.pipeline = {
 	
 	create : pipeline.and([
+		pipeline.debug('before create'),
 		ui.select('#new-todo'),
 		ui.character.enter,
 		ui.element.value.get,
@@ -618,6 +635,244 @@ db.pipeline = {
 	}
 };
 
+///////////////////////////////////////////////////////////
+
+var once = function(f){
+	var called = false;
+	return function(){
+		if(!called && f){ called = true; f.apply(this,arguments); }
+	};
+};
+
+
+var store={
+	db  : null,
+	init : function(cb){
+		var self = this;
+		if(self.db){ cb(null,self); return; }
+		
+		cb = once(cb);
+		var r = window.indexedDB.open('todos',1);
+		r.onupgradeneeded=function(e) {
+			var db = e.target.result;
+			e.target.transaction.onerror = cb; // A versionchange transaction is started automatically.
+			
+			if(db.objectStoreNames.contains('todos')) db.deleteObjectStore('todos');
+			var objectStore = db.createObjectStore('todos', {keyPath: 'id'});
+			objectStore.createIndex('completed_id', ['completed','id'], {unique: true});
+		};
+		r.onsuccess = function(e){ self.db = e.target.result; cb(null,self); };
+		r.onerror   = r.onblocked = cb;
+	},
+	
+	remove:function(cb){
+		cb = once(cb);
+		var self = this;
+		if(self.db)this.db.close();
+		
+		var r = window.indexedDB.deleteDatabase('todos');
+		r.onsuccess = function(e){ cb(null,self);};
+		r.onerror = r.onblocked = cb;
+	},
+	
+	put: function(todo,cb){
+		cb = once(cb);
+		var
+			self  = this,
+			tx    = self.db.transaction(['todos'], 'readwrite');
+		tx.oncomplete = function() { cb(null,todo);};
+		tx.onerror = tx.onabort = cb;
+		
+		var
+			store = tx.objectStore('todos'),
+			r     = store.put(todo);
+	},
+	
+	index:function(index, range, cb){ // loop over an index using a range, we return a function as iterator
+		cb=once(cb);
+		var
+			self  = this,
+			r     = index.openCursor(range,'nextunique'),
+			first = true,
+			next  = null;
+		r.onsuccess = function(e) {
+			var result = e.target.result,
+				value = result ? result.value : null,
+				iterator = function F(new_next){
+					next = new_next || next;
+					if(result) result.continue();
+					else next && next(null,null);
+				};
+			if ( first ){
+				first = false;
+				cb(null, function (new_next){
+					next = new_next || next;
+					return next ? next(value,iterator) : value;
+				});
+			} else return next ? next(value,iterator):value;
+		};
+		r.onerror = r.onblocked = cb;
+	},
+	get:function(id, cb){
+		cb=once(cb);
+		var
+			self  = this,
+			todo  = null,
+			tx    = self.db.transaction(['todos'],'readonly');
+		tx.oncomplete = function() { cb(null,todo); };
+		tx.onerror = tx.onabort = cb;
+		
+		var
+			store = tx.objectStore('todos'),
+			index = store.index('id'),
+			range = window.IDBKeyRange.only(id);
+		
+		self.index(index,range,function(err,results){
+			if(err||!results){ cb(err,null); return; }
+			results(function(result,next){ todo=result; next(); });
+		});
+	},
+	delete:function(id, cb){
+		cb=once(cb);
+		var
+			self  = this,
+			tx    = self.db.transaction(['todos'],'readwrite');
+		tx.oncomplete = function() { cb(null,id); };
+		tx.onerror = tx.onabort = cb;
+		var
+			store = tx.objectStore('todos'),
+			r = store.delete(id);
+	},
+	get_all:function(after_id,before_id,limit,filter,cb){           // /todos/all?from=id&limit=20
+		cb=once(cb);
+		after_id  = after_id || 0;
+		before_id = before_id || Number.MAX_VALUE;
+		if(filter==='all') filter = null;
+		var
+			self  = this,
+			tx    = self.db.transaction(['todos'],'readonly');
+		tx.oncomplete = function() { cb(null,null); };
+		tx.onerror = tx.onabort = cb;
+		
+		var
+			store = tx.objectStore('todos'),
+			index = !filter ? store.index('id') : store.index('completed_id'),
+			lower = !filter ? after_id  : [filter==='completed',after_id ],
+			upper = !filter ? before_id : [filter==='completed',before_id],
+			range = window.IDBKeyRange.bound(lower,upper, true, true); // exclude lower/uper
+		
+		self.index(index,range,function(err,results){
+			if(err||!results){ cb(err,null); return; }
+			results(function(result,next){ cb(null,result); if(--limit)next(); });
+		});
+	}
+};
+
+(function(S){
+	
+	S.todo = {
+		init   : function(m,cb){ S.init(function(err){cb(err,m);}); },
+		put    : function(m,cb){ S.put   (m.todo||m.operation.body,function(e){ cb(e,m);}); },
+		get    : function(m,cb){ S.get   (m.id  ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
+		delete : function(m,cb){ S.delete(m.id  ||m.operation.body.id,function(e,id){ cb(e,m);}); },
+		get_all: function(m,cb){ m.query = m.query || {}; S.get_all(m.query.from,null,m.query.limit,m.filter,cb ); }, // call back called for each found element
+	};
+	
+	S.pipeline = {
+		create : pipeline.and([
+			db.select.post,
+			db.select.url(/\/todos\/?$/),
+			db.operation.add_id,
+			S.todo.put
+		]),
+		
+		completed: pipeline.and([
+			db.select.put,
+			db.select.url(/\/todos\/([^\/]+)\/completed$/,['id']),
+			pipeline.debug('completed'),
+			db.operation.completed,
+			S.todo.get,
+			function(m){ m.todo.completed = m.completed; },
+			S.todo.put
+		]),
+		
+		/*all_completed: pipeline.and([
+			db.select.put,
+			db.select.url(/\/todos\/completed$/),
+			db.operation.completed,
+		]),*/
+		
+		title: pipeline.and([
+			db.select.put,
+			db.select.url(/\/todos\/([^\/]+)\/title$/,['id']),
+			pipeline.debug('title'),
+			S.todo.get,
+			function(m){ m.todo.title = m.title; },
+			S.todo.put
+		]),
+		
+		/*
+		delete_completed: pipeline.and([
+			db.select.delete,
+			db.select.url(/\/todos\/completed$/),
+		]),
+		*/
+		
+		delete: pipeline.and([
+			db.select.delete,
+			db.select.url(/\/todos\/([^\/]+)$/,['id']),
+			pipeline.debug('delete'),
+			S.todo.delete,
+		]),
+		
+		/*
+		filter : {
+			set: pipeline.and([
+				db.select.put,
+				db.select.url(/\/todos$/)
+			])
+		}*/
+		
+		get_all : pipeline.and([
+			db.select.get,
+			db.select.url(/\/todos\/(all|complete|active)$/,['filter']),
+			S.todo.get_all,
+		]),
+		
+		get : pipeline.and([
+			db.select.get,
+			db.select.url(/\/todos\/([^\/]+)$/,['id']),
+			S.todo.get,
+		]),
+	};
+	
+	var operation = S.pipeline;
+	
+	S.input = {
+		handler : pipeline.and([
+			S.todo.init,
+			pipeline.or([
+				operation.create,
+				operation.completed,
+				//operation.all_completed,
+				operation.title,
+				//operation.delete_completed,
+				operation.delete,
+				//operation.filter.set
+			]),
+			function(m){ return S.output.handler(m); }
+		])
+	};
+	
+	S.output = {
+		handler: function(m){return m;}
+	};
+	
+	
+})(store);
+
+///////////////////////////////////////////////////////////
+
 var action    = ui.pipeline;
 var operation = db.pipeline;
 
@@ -639,15 +894,22 @@ events.backend.input.handler = pipeline.and([
 ]);
 
 
+
 // zero backend output <- input
-//events.backend.output.handler = function(m){ setTimeout(function(){ events.backend.input.handler(m); },0); };
-events.backend.output.handler = events.backend.input.handler;
+// ZERO async events.backend.output.handler = function(m){ setTimeout(function(){ events.backend.input.handler(m); },0); };
+
+// ZERO sync events.backend.output.handler = events.backend.input.handler;
+//
+// storage:  backend output -> store input -> store.output -> backend input
+events.backend.output.handler = store.input.handler;
+store.output.handler = events.backend.input.handler;
 
 // UI
 events.frontend.handler = pipeline.and([
 	ui.filter.inject,
 	pipeline.or([
 		action.create,
+		pipeline.debug('after create'),
 		action.completed,
 		action.all_completed,
 		action.destroy,

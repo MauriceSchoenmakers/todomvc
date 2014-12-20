@@ -3,22 +3,65 @@
 // DEBUGGER IDE SUPPORT
 var debug = function(m){debugger;return m;};
 
-var value2dom = function(v,el){
-		     if (el.type === 'checkbox'){ el.checked   = !!v; }
-		else if ('value'   in el       ){ el.value     = v;   }
-		else                            { el.innerHTML = v;   }
+
+// QUERY
+// on the first dom query we create a clone of the body if not already done...
+
+var new_focus_id = function F(){
+	return (F.id = F.id ? ++F.id : 1 );
 };
 
+var dom = {
+	value : function(el,v){
+	         if (el.type === 'checkbox'){ el.checked   = !!v; }
+		else if ('value'   in el       ){ el.value     = v;   }
+		else                            { el.innerHTML = v;   }
+	},
+	
+	/*
+	clone : null, // cloned dom body in a fragment
+	body : function(){
+		var self=this;
+		if(!self.clone){
+			self.clone = document.createDocumentFragment();
+			var focus_el = document.activeElement;
+			var focus_id = focus_el.id || (focus_el.id='focus_'+new_focus_id()); // store focus id before cloning
+			self.clone.appendChild(document.body.cloneNode(true));
+			window.requestAnimationFrame(function(){
+				if(self.clone){
+					document.body=self.clone.childNodes[0];
+					var new_focus_el = document.getElementById(focus_id);
+					if(new_focus_el) new_focus_el.focus();
+					self.clone=null;
+				}
+			});
+		}
+		return this.clone;
+	},
+	*/
+	
+	query : function(selector,context){
+		context = context || document; //.this.body();
+		return context.querySelectorAll(selector);
+	},
+	
+	query1 : function(selector,context){
+		context = context || document; // this.body();
+		return context.querySelector(selector);
+	}
+};
+
+
 // TEMPLATING ENGINE
-var render = function(root,n,v,id){
-	var els = root.querySelectorAll('[data='+n+']');
+dom.render = function(root,n,v,id){
+	var els = dom.query('[data='+n+']',root);
 	for (var i = 0, l = els.length; i<l; ++i) {
 		var el=els[i];
 		if (id) el.setAttribute('data-id',id);
 		
 		if ('id'===n) continue;
 		
-		value2dom(v,el);
+		dom.value(el,v);
 		
 		if (id) el.setAttribute('data-id',id);
 	}
@@ -28,6 +71,7 @@ var render = function(root,n,v,id){
 var new_id = function F(){
 	return (F.id = F.id ? ++F.id : 1 );
 };
+
 
 // APPLICATION BUILDING BLOCKS
 var todo = {
@@ -57,7 +101,7 @@ var todo = {
 				trim  : function(m){ var v = m.value; if (v) m.value = v.replace(/^\s+/,'').replace(/\s+$/,''); return m; },
 				reset : function(m){ var el = m.element; if (el) el.value = ''; return m; },
 				set   : function(element,prop){
-					var set_value=function(v){ return function(el){ value2dom(v,el); }; };
+					var set_value=function(v){ return function(el){ dom.value(el,v); }; };
 					return function(m){
 						if(!m[element] || !(prop in m) ) return m;
 						var el=m[element],f=set_value(m[prop]);
@@ -109,19 +153,25 @@ var todo = {
 				};
 			},
 			
-			find: function(context,selector,element,all){
+			find: function(element,selector,context){
 				element = element || 'element';
-				var query = all ? 'querySelectorAll' : 'querySelector';
 				return function(m){
-					var c = typeof(context) ==='string' ? m[context] : context;
-					if(!c[query]) return m;
-					m[element] = c[query](selector);
+					var c = context ? m[context] : null;
+					m[element] = dom.query(selector,c);
+					return m;
+				};
+			},
+			find1: function(element,selector,context){
+				element = element || 'element';
+				return function(m){
+					var c = context ? m[context] : null;
+					m[element] = dom.query1(selector,c);
 					return m;
 				};
 			}
 		},
 		
-		list : function(m){ m.list = document.querySelector('#todo-list'); if(m.list) return m; },
+		list : function(m){ m.list = dom.query1('#todo-list'); if(m.list) return m; },
 		
 		item : {
 			select : {
@@ -129,15 +179,15 @@ var todo = {
 			},
 			
 			find : {
-				id:        function(m){ if(!m.id) return m; m.item = document.querySelector('#todo-list li[data-id="'+m.id+'"]'); return m; },
-				completed: function(m){ m.items = document.querySelectorAll('#todo-list li.completed'      ); return m; },
-				active:    function(m){ m.items = document.querySelectorAll('#todo-list li:not(.completed)'); return m; },
-				all:       function(m){ m.items = document.querySelectorAll('#todo-list li'                ); return m; },
+				id:        function(m){ if(!m.id) return m; m.item = dom.query1('#todo-list li[data-id="'+m.id+'"]'); return m; },
+				completed: function(m){ m.items = dom.query('#todo-list li.completed'); return m; },
+				active:    function(m){ m.items = dom.query('#todo-list li:not(.completed)'); return m; },
+				all:       function(m){ m.items = dom.query('#todo-list li'                ); return m; },
 			},
 			
 			template : {
 				create: function(m){
-					var t = document.querySelector('#item-template'), content = t ? t.content : null;
+					var t = dom.query1('#item-template'), content = t ? t.content : null;
 					m.item =  content ? content.cloneNode(true) : null;
 					if(m.item) return m; },
 				
@@ -146,7 +196,7 @@ var todo = {
 					if (!root) return m;
 					var op = m.operation, body = op ? op.body : null, id = body ? body.id : null;
 					if (!body) return m;
-					for (var p in body) render(root, p, body[p], id);
+					for (var p in body) dom.render(root, p, body[p], id);
 					return m;
 				}
 			},
@@ -159,7 +209,7 @@ var todo = {
 				if (!root) return m;
 				var data = m.data;
 				if (!data) return m;
-				for (var p in data) render(root, p, data[p]);
+				for (var p in data) dom.render(root, p, data[p]);
 				return m;
 			}
 		}
@@ -290,7 +340,7 @@ todo.frontend.filter = {
 		completed : function(m){ if(m.filter==='completed') return m; }
 	},
 	
-	find : function(m){ m.element = document.querySelector('#filters li a[href="#/'+m.filter+'"]'); return m; }
+	find : function(m){ m.element = dom.query1('#filters li a[href="#/'+m.filter+'"]'); return m; }
 };
 
 location.href = location.pathname+'#/'+todo.frontend.filter.value;
@@ -363,7 +413,7 @@ ui.pipeline = {
 		db.operation.delete,
 		events.frontend.log
 	]),
-	
+
 	destroy_completed : pipeline.and([
 		ui.type('click'),
 		ui.select('#clear-completed'),
@@ -378,7 +428,7 @@ ui.pipeline = {
 			ui.element.data_id.get,
 			ui.item.find.id,
 			ui.element.toggle('item',true,'editing'),
-			ui.element.find('item','.edit','input'),
+			ui.element.find1('input','.edit','item'),
 			ui.element.focus('input'),
 			function(m){ if(!m.input || !m.input.value ) return m; m.input.__value = m.input.value; return m; },
 			events.frontend.log
@@ -412,7 +462,7 @@ ui.pipeline = {
 			ui.element.data_id.get,
 			ui.item.find.id,
 			ui.element.toggle('item',false,'editing'),
-			ui.element.find('item','.edit','input'),
+			ui.element.find1('input','.edit','item'),
 			function(m){ if(!m.input || !m.input.__value) return m; m.input.value = m.input.__value; return m; },
 			events.frontend.log
 		])
@@ -449,11 +499,11 @@ db.pipeline = {
 		ui.element.toggle('item','completed','completed'),
 		
 		function(m){ m.value = m.completed ? ++db.list.completed : --db.list.completed ; return m;}, // total completed
-		ui.element.find(document,'#clear-completed','clear'),
+		ui.element.find1('clear','#clear-completed'),
 		ui.element.toggle('clear','value','hidden',true),
 		
 		function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
-		ui.element.find(document,'#toggle-all','toggle-all'),
+		ui.element.find1('toggle-all','#toggle-all'),
 		ui.element.value.set('toggle-all','completed-all'),
 		
 		events.backend.input.log
@@ -463,13 +513,13 @@ db.pipeline = {
 		db.select.put,
 		db.select.url(/\/todos\/completed$/),
 		db.operation.completed,
-		ui.element.find(document,'#todo-list .toggle','toggles',true),
+		ui.element.find('toggles','#todo-list .toggle'),
 		ui.element.value.set('toggles','completed'),
 		ui.item.find.all,
 		ui.element.toggle('items','completed','completed'),
 		
 		function(m){ m.value = m.completed ? (db.list.completed=db.list.count) : (db.list.completed=0) ; return m;}, // total completed
-		ui.element.find(document,'#clear-completed','clear'),
+		ui.element.find1('clear','#clear-completed','clear'),
 		ui.element.toggle('clear','value','hidden',true),
 		
 		events.backend.input.log
@@ -491,7 +541,7 @@ db.pipeline = {
 		function(m){ m.count = db.list.count-db.list.completed; return m;},
 		
 		function(m){ m.value = db.list.completed=0; return m;},
-		ui.element.find(document,'#clear-completed','clear'),
+		ui.element.find1('clear','#clear-completed'),
 		ui.element.toggle('clear','value','hidden',true),
 		
 		events.backend.input.log
@@ -502,9 +552,9 @@ db.pipeline = {
 		db.select.url(/\/todos\/([^\/]+)$/,['id']),
 		ui.item.find.id,
 		
-		ui.element.find('item','input.toggle','toggle'),
+		ui.element.find1('toggle','input.toggle','item'),
 		function(m){ if(m.toggle && m.toggle.checked) m.value = --db.list.completed; return m;}, // total completed
-		ui.element.find(document,'#clear-completed','clear'),
+		ui.element.find1('clear','#clear-completed'),
 		ui.element.toggle('clear','value','hidden',true),
 		
 		ui.element.remove('item'),
@@ -515,13 +565,13 @@ db.pipeline = {
 	
 	list : pipeline.or([
 		pipeline.and([
-			ui.element.find(document,'#footer','footer'),
+			ui.element.find1('footer','#footer'),
 			ui.element.toggle('footer','count','hidden',true),
-			ui.element.find(document,'#main','main'),
+			ui.element.find1('main','#main'),
 			ui.element.toggle('main','count','hidden',true),
 			
 			db.list.data,
-			ui.element.find(document,'#footer','footer'),
+			ui.element.find1('footer','#footer'),
 			ui.footer.render,
 			
 			events.backend.input.log,
@@ -536,7 +586,7 @@ db.pipeline = {
 			function(m){ m.filter = m.operation.body.filter; return m; },
 			
 			// adapt filter ui
-			ui.element.find(document,'#filters .selected','filter-previous-selected',true),
+			ui.element.find('filter-previous-selected','#filters .selected'),
 			ui.element.toggle('filter-previous-selected',false,'selected'),
 			ui.filter.find,
 			ui.element.toggle('element',true,'selected'),
@@ -589,7 +639,8 @@ events.backend.input.handler = pipeline.and([
 ]);
 
 
-// zero backend output -> input
+// zero backend output <- input
+//events.backend.output.handler = function(m){ setTimeout(function(){ events.backend.input.handler(m); },0); };
 events.backend.output.handler = events.backend.input.handler;
 
 // UI

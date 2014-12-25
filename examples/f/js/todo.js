@@ -79,8 +79,8 @@ var todo = {
 		},
 		
 		character : {
-			enter : function(m){ var e = m.event, v= (e.type==='keydown' ? e.key || e.keyCode : null); if( v && v===13 ) return m; },
-			escape: function(m){ var e = m.event, v= (e.type==='keydown' ? e.key || e.keyCode : null); if( v && v===27 ) return m; }
+			enter : function(m){ var e = m.event, v= (e.type==='keydown' ? e.keyCode : null); if( v && v===13 ) return m; },
+			escape: function(m){ var e = m.event, v= (e.type==='keydown' ? e.keyCode : null); if( v && v===27 ) return m; }
 		},
 		
 		type : function(type){
@@ -346,7 +346,7 @@ location.href = location.pathname+'#/'+todo.frontend.filter.value;
 
 // FRAMEWORK
 var pipeline = {
-	debug : function(msg){ var f = function(m){ console.log(msg + ':' + m ); }; f.debug=true; return f;},
+	debug : function(msg,debug){ var f = function(m){ console.log(msg + ':' + m ); if(debug) debugger; }; f.debug=true; return f;},
 	
 	call: function (and,array){
 		var self=this;
@@ -362,7 +362,7 @@ var pipeline = {
 				
 				var f=array[i++];
 				
-				if(f.debug){ f(m); debugger; next(); return; }
+				if(f.debug){ f(m); next(); return; }
 				
 				if(f.length===1) f = (function(f){ return function(m,f_cb){ m=f(m); f_cb(null,m); }; })(f);
 				
@@ -372,8 +372,8 @@ var pipeline = {
 							m = m || {};
 							m.error = err;
 						}
-						if( ( and ? m !== void 0 : m === void 0) && !m.error) next();
-						else cb && cb( m ? m.error : null,m);
+						if( ( and ? m !== void 0 : m === void 0) && !(m && m.error) ) next();
+						else cb && cb( m ? m.error : null, m);
 					});
 				} catch(err) {
 					m.error = err;
@@ -396,7 +396,6 @@ var db = todo.backend;
 ui.pipeline = {
 	
 	create : pipeline.and([
-		pipeline.debug('before create'),
 		ui.select('#new-todo'),
 		ui.character.enter,
 		ui.element.value.get,
@@ -643,7 +642,24 @@ var once = function(f){
 		if(!called && f){ called = true; f.apply(this,arguments); }
 	};
 };
+var cbx = function(cb,msg,debug){
+	return function(){
+		console.log(msg);
+		if( debug ) debugger;
+		cb.apply(this,arguments);
+	};
+};
 
+var r_handle = function(r,cb,msg,debug){
+	if(!r.onsuccess) r.onsuccess = function(e){ msg+=' request success'                ;cbx(cb,msg,debug)(null,e.target.result); };
+	if(!r.onblocked) r.onblocked = function(e){ msg+=' request blocked:'+e.target.error;cbx(cb,msg,debug)(e.target.error,null); };
+	if(!r.onerror)   r.onerror   = function(e){ msg+=' request error:'  +e.target.error;cbx(cb,msg,debug)(e.target.error,null); };
+};
+var tx_handle = function(tx,cb,msg,debug){
+	if(!tx.oncomplete) tx.oncomplete = function(e){ cbx(cb,msg+' transaction completed',debug)(null,true); };
+	if(!tx.onabort)    tx.onabort    = function(e){ cbx(cb,msg+' transaction abort:'+tx.error,debug)(tx.error,null); };
+	if(!tx.onerror)    tx.onerror    = function(e){ cbx(cb,msg+' transaction error:'+tx.error,debug)(tx.error,null); };
+};
 
 var store={
 	db  : null,
@@ -659,10 +675,10 @@ var store={
 			
 			if(db.objectStoreNames.contains('todos')) db.deleteObjectStore('todos');
 			var objectStore = db.createObjectStore('todos', {keyPath: 'id'});
-			objectStore.createIndex('completed_id', ['completed','id'], {unique: true});
+			objectStore.createIndex('completed_id', ['completed','id'], {unique: true, multiEntry:false});
 		};
 		r.onsuccess = function(e){ self.db = e.target.result; cb(null,self); };
-		r.onerror   = r.onblocked = cb;
+		r_handle(r,cb,'init');
 	},
 	
 	remove:function(cb){
@@ -672,7 +688,7 @@ var store={
 		
 		var r = window.indexedDB.deleteDatabase('todos');
 		r.onsuccess = function(e){ cb(null,self);};
-		r.onerror = r.onblocked = cb;
+		r_handle(r,cb,'remove');
 	},
 	
 	put: function(todo,cb){
@@ -680,8 +696,10 @@ var store={
 		var
 			self  = this,
 			tx    = self.db.transaction(['todos'], 'readwrite');
-		tx.oncomplete = function() { cb(null,todo);};
-		tx.onerror = tx.onabort = cb;
+		tx.oncomplete = function() {
+			cb(null,todo);
+		};
+		tx_handle(tx,cb,'put');
 		
 		var
 			store = tx.objectStore('todos'),
@@ -696,41 +714,41 @@ var store={
 			first = true,
 			next  = null;
 		r.onsuccess = function(e) {
-			var result = e.target.result,
+			var request = e.target,
+				result = request.result,
 				value = result ? result.value : null,
 				iterator = function F(new_next){
 					next = new_next || next;
 					if(result) result.continue();
-					else next && next(null,null);
+					else next && next(null,null,request);
 				};
 			if ( first ){
 				first = false;
 				cb(null, function (new_next){
 					next = new_next || next;
-					return next ? next(value,iterator) : value;
+					return next ? next(value,value ? iterator : null, request) : value;
 				});
-			} else return next ? next(value,iterator):value;
+			} else  return next ? next(value,value ? iterator : null, request) : value;
 		};
-		r.onerror = r.onblocked = cb;
+		r_handle(r,cb,'index');
 	},
 	get:function(id, cb){
+		//id=parseInt(id);
 		cb=once(cb);
 		var
 			self  = this,
 			todo  = null,
 			tx    = self.db.transaction(['todos'],'readonly');
 		tx.oncomplete = function() { cb(null,todo); };
-		tx.onerror = tx.onabort = cb;
+		tx_handle(tx,cb,'get');
 		
 		var
 			store = tx.objectStore('todos'),
-			index = store.index('id'),
-			range = window.IDBKeyRange.only(id);
-		
-		self.index(index,range,function(err,results){
-			if(err||!results){ cb(err,null); return; }
-			results(function(result,next){ todo=result; next(); });
-		});
+			r = store.get(parseInt(id));
+		r.onsuccess = function(e) {
+			todo=e.target.result;
+		};
+		r_handle(r,cb,'get');
 	},
 	delete:function(id, cb){
 		cb=once(cb);
@@ -738,32 +756,64 @@ var store={
 			self  = this,
 			tx    = self.db.transaction(['todos'],'readwrite');
 		tx.oncomplete = function() { cb(null,id); };
-		tx.onerror = tx.onabort = cb;
+		tx_handle(tx,cb,'delete');
 		var
 			store = tx.objectStore('todos'),
-			r = store.delete(id);
+			r = store.delete(parseInt(id));
 	},
-	get_all:function(after_id,before_id,limit,filter,cb){           // /todos/all?from=id&limit=20
+	delete_completed:function(cb){
+		cb=once(cb);
+		var self=this;
+		self.get_all(null,null,-1,'completed',true,function(err,results){
+			if(err||!results){ cb(err,null); return; }
+			results(function(value,next,request){
+				if(!value || !request || !request.result){ cb(null,true); return; }
+				
+				var r = request.result.delete();
+				r.onsuccess = function(e) { next && next(); };
+				r_handle(r,cb,'delete completed');
+			});
+		});
+	},
+	all_completed:function(completed,cb){
+		cb=once(cb);
+		var self=this;
+		self.get_all(null,null,-1,completed ? 'active' : 'completed',true,function(err,results){
+			if(err||!results){ cb(err,null); return; }
+			results(function(value,next,request){
+				//debugger;
+				if(!value || !request || !request.result){ cb(null,true); return; }
+				value.completed = completed;
+				var r = request.result.update(value);
+				r.onsuccess = function(e) { next && next(); };
+				r_handle(r,cb,'all completed');
+			});
+		});
+	},
+	get_all:function(after_id,before_id,limit,filter,write,cb){           // /todos/all?from=id&limit=20
 		cb=once(cb);
 		after_id  = after_id || 0;
 		before_id = before_id || Number.MAX_VALUE;
 		if(filter==='all') filter = null;
 		var
 			self  = this,
-			tx    = self.db.transaction(['todos'],'readonly');
-		tx.oncomplete = function() { cb(null,null); };
-		tx.onerror = tx.onabort = cb;
+			tx    = self.db.transaction(['todos'], write ? 'readwrite':'readonly');
+		tx.oncomplete = function() { cbx(cb,'get_all')(null,null); };
+		tx_handle(tx,cb,'get_all');
 		
 		var
 			store = tx.objectStore('todos'),
 			index = !filter ? store.index('id') : store.index('completed_id'),
-			lower = !filter ? after_id  : [filter==='completed',after_id ],
-			upper = !filter ? before_id : [filter==='completed',before_id],
+			lower = !filter ? after_id  : [filter==='completed'?1:0,after_id ],
+			upper = !filter ? before_id : [filter==='completed'?1:0,before_id],
 			range = window.IDBKeyRange.bound(lower,upper, true, true); // exclude lower/uper
 		
 		self.index(index,range,function(err,results){
 			if(err||!results){ cb(err,null); return; }
-			results(function(result,next){ cb(null,result); if(--limit)next(); });
+			cb(null,function(f){
+				if(limit!==-1 && (--limit)>0) f(null,null);
+				results(f);
+			});
 		});
 	}
 };
@@ -771,11 +821,15 @@ var store={
 (function(S){
 	
 	S.todo = {
-		init   : function(m,cb){ S.init(function(err){cb(err,m);}); },
-		put    : function(m,cb){ S.put   (m.todo||m.operation.body,function(e){ cb(e,m);}); },
-		get    : function(m,cb){ S.get   (m.id  ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
-		delete : function(m,cb){ S.delete(m.id  ||m.operation.body.id,function(e,id){ cb(e,m);}); },
-		get_all: function(m,cb){ m.query = m.query || {}; S.get_all(m.query.from,null,m.query.limit,m.filter,cb ); }, // call back called for each found element
+		init            : function(m,cb){ S.init(function(err){cb(err,m);}); },
+		completed2number: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed ? 1 : 0; } return m; },
+		number2completed: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed === 1;   } return m; },
+		put             : function(m,cb){ S.put   (m.todo||m.operation.body   ,function(e     ){              cb(e,m);}); },
+		get             : function(m,cb){ S.get   (m.id  ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
+		delete          : function(m,cb){ S.delete(m.id  ||m.operation.body.id,function(e,id  ){              cb(e,m);}); },
+		delete_completed: function(m,cb){ S.delete_completed(                  function(e     ){              cb(e,m);}); },
+		all_completed   : function(m,cb){ S.all_completed(m.completed         ,function(e     ){              cb(e,m);}); },
+		get_all         : function(m,cb){ m.query = m.query || {}; S.get_all(m.query.from,null,m.query.limit,m.filter,false,cb ); }, // call back called for each found element
 	};
 	
 	S.pipeline = {
@@ -783,45 +837,51 @@ var store={
 			db.select.post,
 			db.select.url(/\/todos\/?$/),
 			db.operation.add_id,
-			S.todo.put
+			S.todo.completed2number,
+			S.todo.put,
+			S.todo.number2completed,
 		]),
 		
 		completed: pipeline.and([
 			db.select.put,
 			db.select.url(/\/todos\/([^\/]+)\/completed$/,['id']),
-			pipeline.debug('completed'),
+			S.todo.completed2number,
 			db.operation.completed,
 			S.todo.get,
-			function(m){ m.todo.completed = m.completed; },
-			S.todo.put
+			function(m){ m.todo.completed = m.completed; return m;},
+			S.todo.put,
+			S.todo.number2completed,
 		]),
 		
-		/*all_completed: pipeline.and([
+		all_completed: pipeline.and([
 			db.select.put,
 			db.select.url(/\/todos\/completed$/),
+			S.todo.completed2number,
 			db.operation.completed,
-		]),*/
+			S.todo.all_completed,
+			S.todo.number2completed,
+		]),
 		
 		title: pipeline.and([
 			db.select.put,
 			db.select.url(/\/todos\/([^\/]+)\/title$/,['id']),
-			pipeline.debug('title'),
+			db.operation.title,
 			S.todo.get,
 			function(m){ m.todo.title = m.title; },
 			S.todo.put
 		]),
 		
-		/*
+		
 		delete_completed: pipeline.and([
 			db.select.delete,
 			db.select.url(/\/todos\/completed$/),
+			S.todo.delete_completed
 		]),
-		*/
+		
 		
 		delete: pipeline.and([
 			db.select.delete,
 			db.select.url(/\/todos\/([^\/]+)$/,['id']),
-			pipeline.debug('delete'),
 			S.todo.delete,
 		]),
 		
@@ -837,12 +897,14 @@ var store={
 			db.select.get,
 			db.select.url(/\/todos\/(all|complete|active)$/,['filter']),
 			S.todo.get_all,
+			S.todo.number2completed,
 		]),
 		
 		get : pipeline.and([
 			db.select.get,
 			db.select.url(/\/todos\/([^\/]+)$/,['id']),
 			S.todo.get,
+			S.todo.number2completed,
 		]),
 	};
 	
@@ -854,9 +916,9 @@ var store={
 			pipeline.or([
 				operation.create,
 				operation.completed,
-				//operation.all_completed,
+				operation.all_completed,
 				operation.title,
-				//operation.delete_completed,
+				operation.delete_completed,
 				operation.delete,
 				//operation.filter.set
 			]),
@@ -909,7 +971,6 @@ events.frontend.handler = pipeline.and([
 	ui.filter.inject,
 	pipeline.or([
 		action.create,
-		pipeline.debug('after create'),
 		action.completed,
 		action.all_completed,
 		action.destroy,

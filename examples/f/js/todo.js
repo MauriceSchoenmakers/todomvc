@@ -3,9 +3,9 @@
 // QUERY
 // on the first dom query we create a clone of the body if not already done...
 
-var new_focus_id = function F(){
+/*var new_focus_id = function F(){
 	return (F.id = F.id ? ++F.id : 1 );
-};
+};*/
 
 var dom = {
 	value : function(el,v){
@@ -47,7 +47,6 @@ var dom = {
 	}
 };
 
-
 // TEMPLATING ENGINE
 dom.render = function(root,n,v,id){
 	var els = dom.query('[data='+n+']',root);
@@ -66,6 +65,25 @@ dom.render = function(root,n,v,id){
 // ID GENERATOR
 var new_id = function F(){
 	return (F.id = F.id ? ++F.id : 1 );
+};
+
+// PARSE QUERY STRING
+var url = {
+	decode : function (s) { return decodeURIComponent(s.replace('+',' ')); }
+};
+url.query = function(m){
+	var
+		u  = m.url,
+		qi = u ? u.indexOf('?') : -1,
+		q  = ~qi ? u.substring(qi+1) : null;
+	
+	if(!q) return m;
+	
+	var query = (m.query = {}), decode = url.decode;
+	q.replace(/([^&=]+)=?([^&]*)/g,function(m,n,v){
+		query[decode(n)] = decode(v);
+	});
+	return m;
 };
 
 
@@ -112,18 +130,20 @@ var todo = {
 			},
 			
 			toggle : function(element,prop,name,inverse){
-				var toggle_element = function(set){
-					return function(el){
-						var cl=(el.getAttribute('class')||'').split(/\s+/), i=cl.indexOf(name);
-						     if ( set && !~i) el.setAttribute('class', cl.concat(name).join(' '));
-						else if (!set &&  ~i) el.setAttribute('class', (cl.splice(i,1),cl).join(' '));
-					};
-				};
+				var
+					l=name.length,
+					toggle_class = function(set,el){
+						var cl=(el.className||''), i=cl.indexOf(name);
+						     if ( set && !~i) el.className = cl+' '+name;
+						else if (!set &&  ~i) el.className = cl.substring(0,i)+cl.substring(i+l);
+					},
+					add_class    = toggle_class.bind(null,!inverse ), // flip meaning based on inverse
+					remove_class = toggle_class.bind(null,!!inverse);
+				
 				return function(m){
 					if(!m[element] || (!(prop in m) && prop!==true && prop!==false)) return m;
 					var set = typeof(prop)==='string'? m[prop] : prop;
-					set = inverse ? !set  : !!set;
-					var f = toggle_element(set), el=m[element];
+					var f = set ? add_class : remove_class, el=m[element];
 					if(el.item) Array.prototype.forEach.call(el,f); else f(el);
 					return m;
 				};
@@ -194,7 +214,7 @@ var todo = {
 					return m;
 				}
 			},
-			add : function(m){ if( m.list && m.item) m.list.appendChild(m.item); return m; }
+			add : function(m){ if( m.list && m.item) m.list.appendChild(m.item); m.item = m.list.lastElementChild; return m; }
 		},
 		
 		footer : {
@@ -220,10 +240,11 @@ var todo = {
 			
 			url : function(u,map){
 				return (typeof(u)==='string' ?
-					function(m){ var v=m.operation ? m.operation.url : null; if(v && v.substring(0,u.length)===u) return m; } :
+					function(m){ var v=m.operation ? m.operation.url : null; if(v && v.substring(0,u.length)===u){ m.url=v; return m;} } :
 					function(m){
 						var v = m.operation ? m.operation.url : null, match = v ? u.exec(v) : null;
 						if(!match) return;
+						m.url=v;
 						if(!map) return m;
 						for(var i=1,l=match.lenght;i<l;++i){
 							var g=match[i];
@@ -306,6 +327,15 @@ var todo = {
 				m.operation = { method: 'delete', url: '/todos/completed' };
 				m.properties.operation=true;
 				return m;
+			},
+			
+			get: {
+				all : function(m){
+					if(!('from' in m)) return m;
+					m.operation = { method: 'get', url: '/todos/?from='+m.from+'&limit='+ ( m.limit || 100 )  };
+					m.properties.operation=true;
+					return m;
+				}
 			}
 		}
 	}
@@ -342,6 +372,21 @@ todo.frontend.filter = {
 	find : function(m){ m.element = dom.query1('#filters li a[href="#/'+m.filter+'"]'); return m; }
 };
 
+todo.frontend.scroll = {
+	offset: void 0
+};
+(function(scroll){
+	todo.frontend.scroll.select = {
+		init : function(m){
+			if(typeof(scroll.offset)==='undefined'){
+				scroll.offset = 0;
+				m.from  = 0;
+			}
+			return m;
+		}
+	};
+})(todo.frontend.scroll);
+
 location.href = location.pathname+'#/'+todo.frontend.filter.value;
 
 // FRAMEWORK
@@ -356,13 +401,13 @@ var pipeline = {
 			
 			if(m.error){ cb && cb(m.error,m); return; }
 			
-			var i=0,l=array.length;
-			(function next(){
+			var l=array.length;
+			(function next(i){
 				if(i>=l){ cb && cb(null,m); return; }
 				
 				var f=array[i++];
 				
-				if(f.debug){ f(m); next(); return; }
+				if(f.debug){ f(m); next(i); return; }
 				
 				if(f.length===1) f = (function(f){ return function(m,f_cb){ m=f(m); f_cb(null,m); }; })(f);
 				
@@ -372,14 +417,16 @@ var pipeline = {
 							m = m || {};
 							m.error = err;
 						}
-						if( ( and ? m !== void 0 : m === void 0) && !(m && m.error) ) next();
+						if( ( and ? m !== void 0 : m === void 0) && !(m && m.error) ) next(i);
 						else cb && cb( m ? m.error : null, m);
 					});
 				} catch(err) {
+					console.log(err);
+					console.log(err.stack);
 					m.error = err;
 					cb && cb(m.error,m);
 				}
-			})();
+			})(0);
 		};
 	}
 };
@@ -429,7 +476,7 @@ ui.pipeline = {
 		db.operation.delete,
 		events.frontend.log
 	]),
-
+	
 	destroy_completed : pipeline.and([
 		ui.type('click'),
 		ui.select('#clear-completed'),
@@ -489,7 +536,20 @@ ui.pipeline = {
 		function(m){ if(location.hash) m.filter = location.hash.substring(2); return m; },
 		ui.filter.extract,
 		db.operation.put.filter,
-	])
+	]),
+	
+	paint: pipeline.and([
+		ui.type('paint'),
+		function F(m){
+			if (F.lastPosition === window.pageYOffset) {
+				return;
+			}
+			F.lastPosition = window.pageYOffset;
+			return m;
+		},
+		ui.scroll.select.init,
+		db.operation.get.all
+	]),
 };
 
 // REACTING ON BACKEND INPUT
@@ -504,6 +564,18 @@ db.pipeline = {
 		ui.item.template.render,
 		ui.item.add,
 		function(m){ m.count=++db.list.count; return m;},
+		
+		db.operation.completed,
+		ui.element.toggle('item','completed','completed'),
+		
+		function(m){ m.value = m.completed ? ++db.list.completed : --db.list.completed ; return m;}, // total completed
+		ui.element.find1('clear','#clear-completed'),
+		ui.element.toggle('clear','value','hidden',true),
+		
+		function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
+		ui.element.find1('toggle-all','#toggle-all'),
+		ui.element.value.set('toggle-all','completed-all'),
+		
 		events.backend.input.log
 	]),
 	
@@ -674,7 +746,7 @@ var store={
 			e.target.transaction.onerror = cb; // A versionchange transaction is started automatically.
 			
 			if(db.objectStoreNames.contains('todos')) db.deleteObjectStore('todos');
-			var objectStore = db.createObjectStore('todos', {keyPath: 'id'});
+			var objectStore = db.createObjectStore('todos', {keyPath: 'id', autoIncrement:true });
 			objectStore.createIndex('completed_id', ['completed','id'], {unique: true, multiEntry:false});
 		};
 		r.onsuccess = function(e){ self.db = e.target.result; cb(null,self); };
@@ -703,7 +775,9 @@ var store={
 		
 		var
 			store = tx.objectStore('todos'),
-			r     = store.put(todo);
+			r = store.put(todo);
+			r.onsuccess = function (e) { todo.id = e.target.result; };
+			r_handle(r,cb,'put',true);
 	},
 	
 	index:function(index, range, cb){ // loop over an index using a range, we return a function as iterator
@@ -803,7 +877,7 @@ var store={
 		
 		var
 			store = tx.objectStore('todos'),
-			index = !filter ? store.index('id') : store.index('completed_id'),
+			index = !filter ? store : store.index('completed_id'),
 			lower = !filter ? after_id  : [filter==='completed'?1:0,after_id ],
 			upper = !filter ? before_id : [filter==='completed'?1:0,before_id],
 			range = window.IDBKeyRange.bound(lower,upper, true, true); // exclude lower/uper
@@ -811,8 +885,10 @@ var store={
 		self.index(index,range,function(err,results){
 			if(err||!results){ cb(err,null); return; }
 			cb(null,function(f){
-				if(limit!==-1 && (--limit)>0) f(null,null);
-				results(f);
+				results(function(v,next,r){
+					if(limit!==-1 && (--limit)===0 ){ f(v,null,r); return; }
+					f(v,next,r);
+				});
 			});
 		});
 	}
@@ -824,19 +900,35 @@ var store={
 		init            : function(m,cb){ S.init(function(err){cb(err,m);}); },
 		completed2number: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed ? 1 : 0; } return m; },
 		number2completed: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed === 1;   } return m; },
-		put             : function(m,cb){ S.put   (m.todo||m.operation.body   ,function(e     ){              cb(e,m);}); },
+		put             : function(m,cb){ S.put   (m.todo||m.operation.body   ,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
 		get             : function(m,cb){ S.get   (m.id  ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
 		delete          : function(m,cb){ S.delete(m.id  ||m.operation.body.id,function(e,id  ){              cb(e,m);}); },
 		delete_completed: function(m,cb){ S.delete_completed(                  function(e     ){              cb(e,m);}); },
 		all_completed   : function(m,cb){ S.all_completed(m.completed         ,function(e     ){              cb(e,m);}); },
-		get_all         : function(m,cb){ m.query = m.query || {}; S.get_all(m.query.from,null,m.query.limit,m.filter,false,cb ); }, // call back called for each found element
+		get_all         : function(m,cb){
+			m.query = m.query || {};
+			S.get_all(parseInt(m.query.from),null,parseInt(m.query.limit),m.filter,false,function(err,results){
+				if(err || !results){ cb(err,m); return; }
+				// callback called for each found element
+				var forwarded=false;
+				results(function(value,next){
+					if(!value){ if(!forwarded){ cb(null,m); } return; } // call callback at least once...
+					forwarded=true;
+					m.operation = { method: 'post', url: '/todos', body: value };
+					m.properties.operation=true;
+					cb(null,m);
+					next && next();
+				});
+			});
+		}
 	};
 	
 	S.pipeline = {
+		
 		create : pipeline.and([
 			db.select.post,
 			db.select.url(/\/todos\/?$/),
-			db.operation.add_id,
+			// db.operation.add_id, done by auto increment
 			S.todo.completed2number,
 			S.todo.put,
 			S.todo.number2completed,
@@ -893,19 +985,23 @@ var store={
 			])
 		}*/
 		
-		get_all : pipeline.and([
-			db.select.get,
-			db.select.url(/\/todos\/(all|complete|active)$/,['filter']),
-			S.todo.get_all,
-			S.todo.number2completed,
-		]),
-		
-		get : pipeline.and([
-			db.select.get,
-			db.select.url(/\/todos\/([^\/]+)$/,['id']),
-			S.todo.get,
-			S.todo.number2completed,
-		]),
+		get : {
+			all : pipeline.and([
+				db.select.get,
+				db.select.url(/\/todos\/(complete|active)?(\?|$)/,['filter']),
+				url.query,
+				S.todo.get_all,
+				S.todo.number2completed,
+			]),
+			/*
+			id : pipeline.and([
+				db.select.get,
+				db.select.url(/\/todos\/([^\/]+)$/,['id']),
+				S.todo.get,
+				S.todo.number2completed,
+			])
+			*/
+		}
 	};
 	
 	var operation = S.pipeline;
@@ -921,6 +1017,7 @@ var store={
 				operation.delete_completed,
 				operation.delete,
 				//operation.filter.set
+				operation.get.all
 			]),
 			function(m){ return S.output.handler(m); }
 		])
@@ -978,7 +1075,8 @@ events.frontend.handler = pipeline.and([
 		action.edit.begin,
 		action.edit.commit,
 		action.edit.abort,
-		action.filter
+		action.filter,
+		action.paint
 	]),
 	events.backend.output.log,
 	events.backend.output.handler

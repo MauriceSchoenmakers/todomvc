@@ -39,6 +39,22 @@ var events = {
 		};
 		
 		i = window_events.length; while(i-->0) window_register(window_events[i]);
+		
+		// paint event
+		var paint_request;
+		var paint_register = function(timestamp){
+			var e = {};
+			e.type = 'paint';
+			e.timestamp = timestamp;
+			var m = { properties : {}, event: e };
+			F.handler(m);
+			paint_request();
+		};
+		
+		paint_request = function(){
+			window.requestAnimationFrame(paint_register);
+		};
+		paint_request();
 	}
 };
 
@@ -81,6 +97,7 @@ events.backend.log = function(prefix){
 	var log = document.getElementById('log-backend');
 	
 	return log ? function(m){
+		if(!m || !m.operation) return;
 		var s = prefix + JSON.stringify(m.operation);
 		
 		log.insertBefore(document.createElement('br'), log.firstChild);

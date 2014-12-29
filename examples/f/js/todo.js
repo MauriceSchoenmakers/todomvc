@@ -332,7 +332,7 @@ var todo = {
 			get: {
 				all : function(m){
 					if(!('from' in m)) return m;
-					m.operation = { method: 'get', url: '/todos/?from='+m.from+'&limit='+ ( m.limit || 100 )  };
+					m.operation = { method: 'get', url: '/todos/?from='+m.from+'&limit='+ ( m.limit || 10000 )  };
 					m.properties.operation=true;
 					return m;
 				}

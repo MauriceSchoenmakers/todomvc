@@ -553,6 +553,23 @@ ui.pipeline = {
 };
 
 // REACTING ON BACKEND INPUT
+
+(function(){
+
+//  reusable pipeline section
+var render_completed = pipeline.and([
+	db.operation.completed,
+	ui.element.toggle('item','completed','completed'),
+	
+	function(m){ m.value = m.completed ? ++db.list.completed : (db.list.completed > 0 ? --db.list.completed : 0); return m;}, // total completed
+	ui.element.find1('clear','#clear-completed'),
+	ui.element.toggle('clear','value','hidden',true),
+	
+	function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
+	ui.element.find1('toggle-all','#toggle-all'),
+	ui.element.value.set('toggle-all','completed-all'),
+]);
+
 db.pipeline = {
 	// if we get a post for the collection we get the item template, render it, add it to the list and finally we log the executed operation
 	create : pipeline.and([
@@ -565,16 +582,7 @@ db.pipeline = {
 		ui.item.add,
 		function(m){ m.count=++db.list.count; return m;},
 		
-		db.operation.completed,
-		ui.element.toggle('item','completed','completed'),
-		
-		function(m){ m.value = m.completed ? ++db.list.completed : --db.list.completed ; return m;}, // total completed
-		ui.element.find1('clear','#clear-completed'),
-		ui.element.toggle('clear','value','hidden',true),
-		
-		function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
-		ui.element.find1('toggle-all','#toggle-all'),
-		ui.element.value.set('toggle-all','completed-all'),
+		render_completed,
 		
 		events.backend.input.log
 	]),
@@ -583,16 +591,8 @@ db.pipeline = {
 		db.select.put,
 		db.select.url(/\/todos\/([^\/]+)\/completed$/,['id']),
 		ui.item.find.id,
-		db.operation.completed,
-		ui.element.toggle('item','completed','completed'),
 		
-		function(m){ m.value = m.completed ? ++db.list.completed : --db.list.completed ; return m;}, // total completed
-		ui.element.find1('clear','#clear-completed'),
-		ui.element.toggle('clear','value','hidden',true),
-		
-		function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
-		ui.element.find1('toggle-all','#toggle-all'),
-		ui.element.value.set('toggle-all','completed-all'),
+		render_completed,
 		
 		events.backend.input.log
 	]),
@@ -706,7 +706,10 @@ db.pipeline = {
 	}
 };
 
+})();
+
 ///////////////////////////////////////////////////////////
+// INDEX DB
 
 var once = function(f){
 	var called = false;
@@ -893,6 +896,7 @@ var store={
 		});
 	}
 };
+///////////////////////////////////////////////////////////
 
 (function(S){
 	

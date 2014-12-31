@@ -134,10 +134,10 @@ var todo = {
 					l=name.length,
 					toggle_class = function(set,el){
 						var cl=(el.className||''), i=cl.indexOf(name);
-						     if ( set && !~i) el.className = cl+' '+name;
+						     if ( set && !~i) el.className = (cl ? cl+' '+name : name );
 						else if (!set &&  ~i) el.className = cl.substring(0,i)+cl.substring(i+l);
 					},
-					add_class    = toggle_class.bind(null,!inverse ), // flip meaning based on inverse
+					add_class    = toggle_class.bind(null,!inverse), // flip meaning based on inverse
 					remove_class = toggle_class.bind(null,!!inverse);
 				
 				return function(m){
@@ -287,6 +287,12 @@ var todo = {
 				return m;
 			},
 			
+			last : function(m){
+				var op = m.operation, headers = op ? op.headers : null, last = headers ? headers['x-last'] : void 0;
+				if (last !== void 0) m.last = !!last;
+				return m;
+			},
+			
 			put: {
 				completed: function(m){
 					if(!m.id || !('value' in m) ) return m;
@@ -332,7 +338,7 @@ var todo = {
 			get: {
 				all : function(m){
 					if(!('from' in m)) return m;
-					m.operation = { method: 'get', url: '/todos/?from='+m.from+'&limit='+ ( m.limit || 10000 )  };
+					m.operation = { method: 'get', url: '/todos/?from='+m.from+'&limit='+ ( m.limit ||  3  )  };
 					m.properties.operation=true;
 					return m;
 				}
@@ -340,6 +346,9 @@ var todo = {
 		}
 	}
 };
+
+
+
 
 todo.backend.list.data = function(m){
 	m.data = {};
@@ -349,6 +358,8 @@ todo.backend.list.data = function(m){
 	m.data['active-plural']= m.data.active === 1 ? '':'s';
 	return m;
 };
+
+
 
 
 todo.frontend.filter = {
@@ -371,23 +382,57 @@ todo.frontend.filter = {
 	
 	find : function(m){ m.element = dom.query1('#filters li a[href="#/'+m.filter+'"]'); return m; }
 };
+// init filter
+location.href = location.pathname+'#/'+todo.frontend.filter.value;
 
+
+// SCROLL
 todo.frontend.scroll = {
-	offset: void 0
+	offset: void 0,
+	item : {
+		first : {
+			get : function(m){ if(!m.list) return; m.first = m.list.firstElementChild; return m;},
+			select : {
+				inside  :function(m){ if(!m.first) return; var rect = m.first.getBoundingClientRect(); if(rect && rect.top    >  0) return m; },
+				outside :function(m){ if(!m.first) return; var rect = m.first.getBoundingClientRect(); if(rect && rect.bottom <= 0) return m; }
+			}
+		},
+		last : {
+			get : function(m){ if(!m.list) return; m.last  = m.list.lastElementChild;  return m;},
+			select : {
+				inside  : function(m){ if(!m.last) return; var rect = m.last.getBoundingClientRect(); if(rect && rect.bottom <  window.innerHeight ) return m; },
+				outside : function(m){ if(!m.last) return; var rect = m.last.getBoundingClientRect(); if(rect && rect.top    >= window.innerHeight ) return m; }
+			},
+			db : {
+				select: function(m){ // set a flag to call db if no already done
+					if(!m.last) return;
+					var cl = m.last.className; if(cl && ~cl.indexOf('last-db-called') ) return;
+					m.last.className = ( cl ? cl + ' ' : '' ) +'last-db-called';
+					return m;
+				},
+				reset: function(m){ // reset the flag if db result found
+					if(!m.last) return m;
+					var cl = m.last.className; if(!cl) return m;
+					m.last.className = cl.replace(/(^|\s+)last\-db\-called/,'');
+					return m;
+				},
+				from :function(m){ if(!m.last) return m; m.from = m.last.getAttribute('data-id'); return m; }
+			}
+		}
+	}
 };
+
 (function(scroll){
 	todo.frontend.scroll.select = {
 		init : function(m){
 			if(typeof(scroll.offset)==='undefined'){
 				scroll.offset = 0;
 				m.from  = 0;
+				return m;
 			}
-			return m;
 		}
 	};
 })(todo.frontend.scroll);
-
-location.href = location.pathname+'#/'+todo.frontend.filter.value;
 
 // FRAMEWORK
 var pipeline = {
@@ -402,31 +447,33 @@ var pipeline = {
 			if(m.error){ cb && cb(m.error,m); return; }
 			
 			var l=array.length;
-			(function next(i){
-				if(i>=l){ cb && cb(null,m); return; }
+			
+			(function next(i,mx){
+				if(i>=l){ cb && cb(null,mx); return; }
 				
 				var f=array[i++];
 				
-				if(f.debug){ f(m); next(i); return; }
+				if(f.debug){ f(mx); next(i,mx); return; }
 				
-				if(f.length===1) f = (function(f){ return function(m,f_cb){ m=f(m); f_cb(null,m); }; })(f);
+				if(f.length===1) f = (function(ff){ return function(mf,cbf){ mf=ff(mf); cbf(null,mf); }; })(f);
 				
 				try {
-					f(m,function(err,m){
-						if(err && !(m && m.error)){
-							m = m || {};
-							m.error = err;
+					f(mx,function(err,mr){
+						if(err && !(mr && mr.error)){
+							mr = mr || {};
+							mr.error = err;
 						}
-						if( ( and ? m !== void 0 : m === void 0) && !(m && m.error) ) next(i);
-						else cb && cb( m ? m.error : null, m);
+						// or returns undefined if it doesn't match, try next with original m unless at the end
+						if( (and ? mr !== void 0 : mr === void 0) && !(mr && mr.error) ) next(i, and ? mr : (i<l ? m : void 0) );
+						else cb && cb( mr ? mr.error : null, mr);
 					});
 				} catch(err) {
 					console.log(err);
 					console.log(err.stack);
-					m.error = err;
-					cb && cb(m.error,m);
+					mx.error = err;
+					cb && cb(mx.error,mx);
 				}
-			})(0);
+			})(0,m);
 		};
 	}
 };
@@ -540,15 +587,32 @@ ui.pipeline = {
 	
 	paint: pipeline.and([
 		ui.type('paint'),
-		function F(m){
+		/*function F(m){
 			if (F.lastPosition === window.pageYOffset) {
 				return;
 			}
 			F.lastPosition = window.pageYOffset;
 			return m;
 		},
-		ui.scroll.select.init,
-		db.operation.get.all
+		*/
+		pipeline.or([
+			pipeline.and([
+				ui.scroll.select.init,
+				db.operation.get.all
+			]),
+			pipeline.and([
+				ui.list,
+				ui.scroll.item.last.get,
+				ui.scroll.item.last.select.inside,
+				function(m){
+					m.last.style.backgroundColor='red';
+					return m;
+				},
+				ui.scroll.item.last.db.select,
+				ui.scroll.item.last.db.from,
+				db.operation.get.all
+			]),
+		])
 	]),
 };
 
@@ -557,18 +621,22 @@ ui.pipeline = {
 (function(){
 
 //  reusable pipeline section
-var render_completed = pipeline.and([
-	db.operation.completed,
-	ui.element.toggle('item','completed','completed'),
-	
-	function(m){ m.value = m.completed ? ++db.list.completed : (db.list.completed > 0 ? --db.list.completed : 0); return m;}, // total completed
-	ui.element.find1('clear','#clear-completed'),
-	ui.element.toggle('clear','value','hidden',true),
-	
-	function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
-	ui.element.find1('toggle-all','#toggle-all'),
-	ui.element.value.set('toggle-all','completed-all'),
-]);
+var render_completed = function(create){
+	return pipeline.and([
+		db.operation.completed,
+		ui.element.toggle('item','completed','completed'),
+		
+		create ?
+		  function(m){ if(m.completed){ ++db.list.completed; } m.value = db.list.completed  > 0; return m;} // count total completed
+		: function(m){ m.value = m.completed ? ++db.list.completed : --db.list.completed; return m;}, // change a single completed flag
+		ui.element.find1('clear','#clear-completed'),
+		ui.element.toggle('clear','value','hidden',true),
+		
+		function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
+		ui.element.find1('toggle-all','#toggle-all'),
+		ui.element.value.set('toggle-all','completed-all'),
+	]);
+};
 
 db.pipeline = {
 	// if we get a post for the collection we get the item template, render it, add it to the list and finally we log the executed operation
@@ -577,12 +645,33 @@ db.pipeline = {
 		db.select.url(/\/todos\/?$/),
 		db.operation.add_id,
 		ui.list,
-		ui.item.template.create,
+		
+		ui.scroll.item.last.get,
+		ui.scroll.item.last.db.reset,
+		
+		// reuse non visible element
+		ui.scroll.item.first.get,
+		pipeline.or([
+			pipeline.and([
+				ui.scroll.item.first.select.outside,
+				function(m){
+					var rect = m.first.getBoundingClientRect();
+					window.scrollBy(0,-(rect.bottom - rect.top));
+					
+					m.item = document.createDocumentFragment(); // use a fragment as render context, otherwise li data-.. is not found
+					m.item.appendChild(m.first);
+					
+					return m;
+				}
+			]),
+			ui.item.template.create
+		]),
+		
 		ui.item.template.render,
 		ui.item.add,
 		function(m){ m.count=++db.list.count; return m;},
 		
-		render_completed,
+		render_completed(true),
 		
 		events.backend.input.log
 	]),
@@ -592,7 +681,7 @@ db.pipeline = {
 		db.select.url(/\/todos\/([^\/]+)\/completed$/,['id']),
 		ui.item.find.id,
 		
-		render_completed,
+		render_completed(),
 		
 		events.backend.input.log
 	]),
@@ -766,6 +855,26 @@ var store={
 		r_handle(r,cb,'remove');
 	},
 	
+	add: function(todo,cb){
+		cb = once(cb);
+		var
+			self  = this,
+			tx    = self.db.transaction(['todos'], 'readwrite');
+		tx.oncomplete = function() {
+			cb(null,todo);
+		};
+		tx_handle(tx,cb,'add');
+		
+		var
+			store = tx.objectStore('todos'),
+			r = store.add(todo);
+			r.onsuccess = function (e) {
+				todo.id = e.target.result;
+				store.put(todo); // to update index as id is part of the index
+			};
+			r_handle(r,cb,'add',true);
+	},
+	
 	put: function(todo,cb){
 		cb = once(cb);
 		var
@@ -779,8 +888,6 @@ var store={
 		var
 			store = tx.objectStore('todos'),
 			r = store.put(todo);
-			r.onsuccess = function (e) { todo.id = e.target.result; };
-			r_handle(r,cb,'put',true);
 	},
 	
 	index:function(index, range, cb){ // loop over an index using a range, we return a function as iterator
@@ -875,7 +982,7 @@ var store={
 		var
 			self  = this,
 			tx    = self.db.transaction(['todos'], write ? 'readwrite':'readonly');
-		tx.oncomplete = function() { cbx(cb,'get_all')(null,null); };
+		tx.oncomplete = function() { cb(null,null); };
 		tx_handle(tx,cb,'get_all');
 		
 		var
@@ -904,9 +1011,10 @@ var store={
 		init            : function(m,cb){ S.init(function(err){cb(err,m);}); },
 		completed2number: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed ? 1 : 0; } return m; },
 		number2completed: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed === 1;   } return m; },
-		put             : function(m,cb){ S.put   (m.todo||m.operation.body   ,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
-		get             : function(m,cb){ S.get   (m.id  ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
-		delete          : function(m,cb){ S.delete(m.id  ||m.operation.body.id,function(e,id  ){              cb(e,m);}); },
+		add             : function(m,cb){ S.add(m.todo||m.operation.body,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
+		put             : function(m,cb){ S.put(m.todo||m.operation.body,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
+		get             : function(m,cb){ S.get(m.id   ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
+		delete          : function(m,cb){ S.delete(m.id||m.operation.body.id,function(e,id  ){              cb(e,m);}); },
 		delete_completed: function(m,cb){ S.delete_completed(                  function(e     ){              cb(e,m);}); },
 		all_completed   : function(m,cb){ S.all_completed(m.completed         ,function(e     ){              cb(e,m);}); },
 		get_all         : function(m,cb){
@@ -934,7 +1042,7 @@ var store={
 			db.select.url(/\/todos\/?$/),
 			// db.operation.add_id, done by auto increment
 			S.todo.completed2number,
-			S.todo.put,
+			S.todo.add,
 			S.todo.number2completed,
 		]),
 		
@@ -963,7 +1071,7 @@ var store={
 			db.select.url(/\/todos\/([^\/]+)\/title$/,['id']),
 			db.operation.title,
 			S.todo.get,
-			function(m){ m.todo.title = m.title; },
+			function(m){ m.todo.title = m.title; return m;},
 			S.todo.put
 		]),
 		

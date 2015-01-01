@@ -214,7 +214,14 @@ var todo = {
 					return m;
 				}
 			},
-			add : function(m){ if( m.list && m.item) m.list.appendChild(m.item); m.item = m.list.lastElementChild; return m; }
+			add : function(m){
+				if( !m.list || !m.item) return m;
+				     if( m.before ) m.list.insertBefore(m.item,m.before);
+				else if( m.replace) m.list.replaceChild(m.item,m.replace);
+				else m.list.appendChild(m.item);
+				m.item = m.list.lastElementChild;
+				return m;
+			}
 		},
 		
 		footer : {
@@ -246,9 +253,9 @@ var todo = {
 						if(!match) return;
 						m.url=v;
 						if(!map) return m;
-						for(var i=1,l=match.lenght;i<l;++i){
-							var g=match[i];
-							if(g) m[i-1]=g;
+						for(var i=0,l=map.length;i<l;++i){
+							var g=match[i+1];
+							if(g) m[map[i]]=g;
 						}
 						return m;
 					});
@@ -272,7 +279,8 @@ var todo = {
 			add_id: function F(m){
 				if (!m.operation) return m;
 				var op = m.operation, body = op ? op.body : null, id = body ? body.id : void 0;
-				if (id === void 0) body.id = new_id();
+				if (id === void 0) id = (body.id = new_id());
+				if (id !== void 0) m.id = id;
 				return m;
 			},
 			
@@ -281,15 +289,10 @@ var todo = {
 				if (completed !== void 0) m.completed = completed;
 				return m;
 			},
+			
 			title: function(m){
 				var op = m.operation, body = op ? op.body : null, title = body ? body.title : void 0;
 				if (title !== void 0) m.title = title;
-				return m;
-			},
-			
-			last : function(m){
-				var op = m.operation, headers = op ? op.headers : null, last = headers ? headers['x-last'] : void 0;
-				if (last !== void 0) m.last = !!last;
 				return m;
 			},
 			
@@ -337,8 +340,15 @@ var todo = {
 			
 			get: {
 				all : function(m){
-					if(!('from' in m)) return m;
-					m.operation = { method: 'get', url: '/todos/?from='+m.from+'&limit='+ ( m.limit ||  3  )  };
+					if(!('from' in m) && !('to' in m) ) return m;
+					m.operation = { method: 'get', url:
+						(
+							'/todos/?' +
+							('from' in m ? '&from='+encodeURI(m.from) : '') +
+							('to'   in m ? '&to='+encodeURI(m.to)     : '') +
+							'&limit='+ ( m.limit ||  3  )
+						).replace('?&','?')
+					};
 					m.properties.operation=true;
 					return m;
 				}
@@ -395,6 +405,21 @@ todo.frontend.scroll = {
 			select : {
 				inside  :function(m){ if(!m.first) return; var rect = m.first.getBoundingClientRect(); if(rect && rect.top    >  0) return m; },
 				outside :function(m){ if(!m.first) return; var rect = m.first.getBoundingClientRect(); if(rect && rect.bottom <= 0) return m; }
+			},
+			db : {
+				select: function(m){ // set a flag to call db if not already done
+					if(!m.first) return;
+					var cl = m.first.className; if(cl && ~cl.indexOf('first-db-called') ) return;
+					m.first.className = ( cl ? cl + ' ' : '' ) +'first-db-called';
+					return m;
+				},
+				reset: function(m){ // reset the flag if db result found
+					if(!m.first) return m;
+					var cl = m.first.className; if(!cl) return m;
+					m.first.className = cl.replace(/(^|\s+)first\-db\-called/,'');
+					return m;
+				},
+				to :function(m){ if(!m.first) return m; m.to = m.first.getAttribute('data-id'); return m; }
 			}
 		},
 		last : {
@@ -404,12 +429,13 @@ todo.frontend.scroll = {
 				outside : function(m){ if(!m.last) return; var rect = m.last.getBoundingClientRect(); if(rect && rect.top    >= window.innerHeight ) return m; }
 			},
 			db : {
-				select: function(m){ // set a flag to call db if no already done
+				select: function(m){ // set a flag to call db if not already done
 					if(!m.last) return;
 					var cl = m.last.className; if(cl && ~cl.indexOf('last-db-called') ) return;
 					m.last.className = ( cl ? cl + ' ' : '' ) +'last-db-called';
 					return m;
 				},
+				selected : function(m){ if(!m.last) return; var cl = m.last.className; if(cl && ~cl.indexOf('last-db-called') ) return m; },
 				reset: function(m){ // reset the flag if db result found
 					if(!m.last) return m;
 					var cl = m.last.className; if(!cl) return m;
@@ -418,6 +444,24 @@ todo.frontend.scroll = {
 				},
 				from :function(m){ if(!m.last) return m; m.from = m.last.getAttribute('data-id'); return m; }
 			}
+		},
+		insert : function(m){
+			if(!m.list || !m.id) return m;
+			var id = parseInt(m.id), cs = m.list.children;
+			for(var i=0,l=cs.length;i<l;i++){
+				var c=cs[i], c_id=c.getAttribute('data-id');
+				if(c_id) c_id = parseInt(c_id);
+				if (c_id === id ){
+					m.replace = c;
+					return m; // no insert
+				} else if(c_id > id){
+					m.before = c;
+					break;
+				} else {
+					m.after = c;
+				}
+			}
+			return m;
 		}
 	}
 };
@@ -452,6 +496,8 @@ var pipeline = {
 				if(i>=l){ cb && cb(null,mx); return; }
 				
 				var f=array[i++];
+				
+				if(!f) debugger;
 				
 				if(f.debug){ f(mx); next(i,mx); return; }
 				
@@ -600,20 +646,36 @@ ui.pipeline = {
 				ui.scroll.select.init,
 				db.operation.get.all
 			]),
-			pipeline.and([
-				ui.list,
-				ui.scroll.item.last.get,
-				ui.scroll.item.last.select.inside,
-				function(m){
-					m.last.style.backgroundColor='red';
-					return m;
-				},
-				ui.scroll.item.last.db.select,
-				ui.scroll.item.last.db.from,
-				db.operation.get.all
-			]),
+			pipeline.or([
+				function(m,cb){ // we split up the event in two (subsequent) events, (we call the cb twice)
+					var m_down={},m_up={};
+					for(var p in m){ m_down[p]=m[p]; m_up[p]=m[p]; }
+					
+					// SCROLL DOWN
+					var  p_down = pipeline.and([
+						ui.list,
+						ui.scroll.item.last.get,
+						ui.scroll.item.last.select.inside,
+						//function(m){ if(!m.last) debugger; m.last.style.backgroundColor='red'; return m; },
+						ui.scroll.item.last.db.select,
+						ui.scroll.item.last.db.from,
+						db.operation.get.all
+					])(m_down,cb);
+					
+					// SCROLL UP
+					var p_up = pipeline.and([
+						ui.list,
+						ui.scroll.item.first.get,
+						ui.scroll.item.first.select.inside,
+						//function(m){ if(!m.first) debugger; m.first.style.backgroundColor='green'; return m; },
+						ui.scroll.item.first.db.select,
+						ui.scroll.item.first.db.to,
+						db.operation.get.all
+					])(m_up,cb);
+				}
+			])
 		])
-	]),
+	])
 };
 
 // REACTING ON BACKEND INPUT
@@ -644,22 +706,70 @@ db.pipeline = {
 		db.select.post,
 		db.select.url(/\/todos\/?$/),
 		db.operation.add_id,
+		
 		ui.list,
 		
-		ui.scroll.item.last.get,
-		ui.scroll.item.last.db.reset,
+		ui.scroll.item.insert,
+		function(m){ if(!m.before) return m; }, // only if it becomes the last item, what is normal if created locally
 		
-		// reuse non visible element
+		ui.scroll.item.last.get,
+		pipeline.or([
+			function(m){ if(!m.last) return m;},
+			pipeline.and([
+				ui.scroll.item.last.db.selected,   // not just last, but also until now without successor
+				ui.scroll.item.last.db.reset,      // new can becomes the new last
+				ui.scroll.item.last.select.inside  // only add if visible
+			])
+		]),
+		ui.item.template.create,
+		
+		ui.item.template.render,
+		ui.item.add,
+		function(m){ m.count=++db.list.count; return m;},
+		
+		render_completed(true),
+		
+		events.backend.input.log
+	]),
+	
+	update : pipeline.and([
+		db.select.put,
+		db.select.url(/\/todos\/([^\/]+)$/,['id']),
+		
+		ui.list,
+		
+		ui.scroll.item.insert,
 		ui.scroll.item.first.get,
+		ui.scroll.item.last.get,
+		
+		
 		pipeline.or([
 			pipeline.and([
+				function(m){ if( m.last && m.after === m.last ) return m; },
+				ui.scroll.item.last.db.reset,
 				ui.scroll.item.first.select.outside,
+				ui.scroll.item.first.db.reset, // cleanup
 				function(m){
 					var rect = m.first.getBoundingClientRect();
 					window.scrollBy(0,-(rect.bottom - rect.top));
 					
 					m.item = document.createDocumentFragment(); // use a fragment as render context, otherwise li data-.. is not found
 					m.item.appendChild(m.first);
+					
+					return m;
+				}
+			]),
+			pipeline.and([
+				function(m){ if( m.first && m.before === m.first ) return m; },
+				ui.scroll.item.first.db.reset,
+				ui.scroll.item.last.select.outside,
+				ui.scroll.item.last.db.reset, // cleanup
+				function(m){
+					var rect = m.first.getBoundingClientRect();
+					window.scrollBy(0,(rect.bottom - rect.top));
+					
+					m.item = document.createDocumentFragment(); // use a fragment as render context, otherwise li data-.. is not found
+					m.item.appendChild(m.last);
 					
 					return m;
 				}
@@ -890,11 +1000,12 @@ var store={
 			r = store.put(todo);
 	},
 	
-	index:function(index, range, cb){ // loop over an index using a range, we return a function as iterator
+	index:function(index, range, direction, cb){ // loop over an index using a range, we return a function as iterator
 		cb=once(cb);
+		if(!direction) direction = 'nextunique';
 		var
 			self  = this,
-			r     = index.openCursor(range,'nextunique'),
+			r     = index.openCursor(range,direction),
 			first = true,
 			next  = null;
 		r.onsuccess = function(e) {
@@ -976,9 +1087,13 @@ var store={
 	},
 	get_all:function(after_id,before_id,limit,filter,write,cb){           // /todos/all?from=id&limit=20
 		cb=once(cb);
+		
+		var direction = !after_id && before_id ? 'prevunique' : 'nextunique';
+		
 		after_id  = after_id || 0;
 		before_id = before_id || Number.MAX_VALUE;
 		if(filter==='all') filter = null;
+		
 		var
 			self  = this,
 			tx    = self.db.transaction(['todos'], write ? 'readwrite':'readonly');
@@ -992,7 +1107,7 @@ var store={
 			upper = !filter ? before_id : [filter==='completed'?1:0,before_id],
 			range = window.IDBKeyRange.bound(lower,upper, true, true); // exclude lower/uper
 		
-		self.index(index,range,function(err,results){
+		self.index(index,range,direction,function(err,results){
 			if(err||!results){ cb(err,null); return; }
 			cb(null,function(f){
 				results(function(v,next,r){
@@ -1019,14 +1134,21 @@ var store={
 		all_completed   : function(m,cb){ S.all_completed(m.completed         ,function(e     ){              cb(e,m);}); },
 		get_all         : function(m,cb){
 			m.query = m.query || {};
-			S.get_all(parseInt(m.query.from),null,parseInt(m.query.limit),m.filter,false,function(err,results){
+			var
+				from = m.query.from ? parseInt(m.query.from) : null,
+				to   = m.query.to   ? parseInt(m.query.to)   : null,
+				limit= m.query.limit? parseInt(m.query.limit): null;
+			
+			S.get_all(from,to,limit,m.filter,false,function(err,results){
+				
 				if(err || !results){ cb(err,m); return; }
+				
 				// callback called for each found element
 				var forwarded=false;
 				results(function(value,next){
 					if(!value){ if(!forwarded){ cb(null,m); } return; } // call callback at least once...
 					forwarded=true;
-					m.operation = { method: 'post', url: '/todos', body: value };
+					m.operation = { method: 'put', url: '/todos/'+encodeURI(value.id) , body: value };
 					m.properties.operation=true;
 					cb(null,m);
 					next && next();
@@ -1153,6 +1275,7 @@ events.backend.input.handler = pipeline.and([
 	ui.filter.inject,
 	pipeline.or([
 		operation.create,
+		operation.update,
 		operation.completed,
 		operation.all_completed,
 		operation.title,

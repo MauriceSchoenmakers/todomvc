@@ -217,7 +217,7 @@ var todo = {
 			add : function(m){
 				if( !m.list || !m.item) return m;
 				     if( m.before ) m.list.insertBefore(m.item,m.before);
-				else if( m.replace) m.list.replaceChild(m.item,m.replace);
+				else if( m.replace) try { m.list.replaceChild(m.item,m.replace); } catch(e){ debugger; throw e; }
 				else m.list.appendChild(m.item);
 				m.item = m.list.lastElementChild;
 				return m;
@@ -1148,6 +1148,8 @@ var store={
 				results(function(value,next){
 					if(!value){ if(!forwarded){ cb(null,m); } return; } // call callback at least once...
 					forwarded=true;
+					m={}; // new message to prevent any side effect
+					m.properties={};
 					m.operation = { method: 'put', url: '/todos/'+encodeURI(value.id) , body: value };
 					m.properties.operation=true;
 					cb(null,m);
@@ -1275,10 +1277,10 @@ events.backend.input.handler = pipeline.and([
 	ui.filter.inject,
 	pipeline.or([
 		operation.create,
-		operation.update,
 		operation.completed,
 		operation.all_completed,
 		operation.title,
+		operation.update,
 		operation.delete_completed,
 		operation.delete,
 		operation.filter.set

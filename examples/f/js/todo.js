@@ -217,9 +217,8 @@ var todo = {
 			add : function(m){
 				if( !m.list || !m.item) return m;
 				     if( m.before ) m.list.insertBefore(m.item,m.before);
-				else if( m.replace) try { m.list.replaceChild(m.item,m.replace); } catch(e){ debugger; throw e; }
+				else if( m.replace) m.list.replaceChild(m.item,m.replace);
 				else m.list.appendChild(m.item);
-				m.item = m.list.lastElementChild;
 				return m;
 			}
 		},
@@ -343,7 +342,9 @@ var todo = {
 					if(!('from' in m) && !('to' in m) ) return m;
 					m.operation = { method: 'get', url:
 						(
-							'/todos/?' +
+							'/todos/'+
+							('filter' in m ? encodeURI(m.filter) : '' )
+							+'?' +
 							('from' in m ? '&from='+encodeURI(m.from) : '') +
 							('to'   in m ? '&to='+encodeURI(m.to)     : '') +
 							'&limit='+ ( m.limit ||  3  )
@@ -398,7 +399,10 @@ location.href = location.pathname+'#/'+todo.frontend.filter.value;
 
 // SCROLL
 todo.frontend.scroll = {
-	offset: void 0,
+	
+	initialize: true,
+	position  : 0,
+	
 	item : {
 		first : {
 			get : function(m){ if(!m.list) return; m.first = m.list.firstElementChild; return m;},
@@ -469,11 +473,16 @@ todo.frontend.scroll = {
 (function(scroll){
 	todo.frontend.scroll.select = {
 		init : function(m){
-			if(typeof(scroll.offset)==='undefined'){
-				scroll.offset = 0;
-				m.from  = 0;
+			if(scroll.initialize){
+				scroll.initialize = false;
+				m.position = scroll.position;
 				return m;
 			}
+		},
+		reinit : function(m){
+			scroll.initialize = true;
+			scroll.position = m.position;
+			return m;
 		}
 	};
 })(todo.frontend.scroll);
@@ -644,7 +653,20 @@ ui.pipeline = {
 		pipeline.or([
 			pipeline.and([
 				ui.scroll.select.init,
-				db.operation.get.all
+				function(m,cb){ // we split up the event in two (subsequent) events, (we call the cb twice)
+					var m_down={},m_up={};
+					for(var p in m){ m_down[p]=m[p]; m_up[p]=m[p]; }
+					
+					pipeline.and([
+						function(m){m.from=m.position;return m;},
+						db.operation.get.all
+					])(m_down,cb);
+					
+					pipeline.and([
+						function(m){m.to=m.position;return m;},
+						db.operation.get.all
+					])(m_up,cb);
+				}
 			]),
 			pipeline.or([
 				function(m,cb){ // we split up the event in two (subsequent) events, (we call the cb twice)
@@ -725,6 +747,7 @@ db.pipeline = {
 		
 		ui.item.template.render,
 		ui.item.add,
+		ui.item.find.id,
 		function(m){ m.count=++db.list.count; return m;},
 		
 		render_completed(true),
@@ -779,6 +802,8 @@ db.pipeline = {
 		
 		ui.item.template.render,
 		ui.item.add,
+		ui.item.find.id,
+		
 		function(m){ m.count=++db.list.count; return m;},
 		
 		render_completed(true),
@@ -878,6 +903,28 @@ db.pipeline = {
 			ui.filter.find,
 			ui.element.toggle('element',true,'selected'),
 			events.backend.input.log,
+		]),
+		
+		// new scroll reinit after a filter is set
+		reinit : pipeline.and([
+			ui.list,
+			ui.scroll.item.first.get,
+			function(m){ // use id of first loaded element inside sroll as new position to begin with
+				
+				var inside=false;
+				
+				if(m.first) do {
+					inside=ui.scroll.item.first.select.inside(m);
+				} while(!inside && (m.first = m.first.nextElementSibling));
+				
+				m.position = inside && m.first ? m.first.dataset.id : 0;
+				
+				return m;
+			},
+			todo.frontend.scroll.select.reinit,
+			
+			ui.item.find.all, // remove all current elements form the list
+			ui.element.remove('items')
 		]),
 		
 		apply : pipeline.or([
@@ -1129,16 +1176,16 @@ var store={
 		add             : function(m,cb){ S.add(m.todo||m.operation.body,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
 		put             : function(m,cb){ S.put(m.todo||m.operation.body,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
 		get             : function(m,cb){ S.get(m.id   ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
-		delete          : function(m,cb){ S.delete(m.id||m.operation.body.id,function(e,id  ){              cb(e,m);}); },
-		delete_completed: function(m,cb){ S.delete_completed(                  function(e     ){              cb(e,m);}); },
-		all_completed   : function(m,cb){ S.all_completed(m.completed         ,function(e     ){              cb(e,m);}); },
+		delete          : function(m,cb){ S.delete(m.id||m.operation.body.id,function(e,id){ cb(e,m);}); },
+		delete_completed: function(m,cb){ S.delete_completed(function(e){ cb(e,m);}); },
+		all_completed   : function(m,cb){ S.all_completed(m.completed,function(e){ cb(e,m);}); },
 		get_all         : function(m,cb){
 			m.query = m.query || {};
 			var
 				from = m.query.from ? parseInt(m.query.from) : null,
 				to   = m.query.to   ? parseInt(m.query.to)   : null,
 				limit= m.query.limit? parseInt(m.query.limit): null;
-			
+			console.log(m.filter);
 			S.get_all(from,to,limit,m.filter,false,function(err,results){
 				
 				if(err || !results){ cb(err,m); return; }
@@ -1213,18 +1260,18 @@ var store={
 			S.todo.delete,
 		]),
 		
-		/*
-		filter : {
+		
+		/*filter : {
 			set: pipeline.and([
 				db.select.put,
 				db.select.url(/\/todos$/)
 			])
-		}*/
+		},*/
 		
 		get : {
 			all : pipeline.and([
 				db.select.get,
-				db.select.url(/\/todos\/(complete|active)?(\?|$)/,['filter']),
+				db.select.url(/\/todos\/(completed|active)?(\?|$)/,['filter']),
 				url.query,
 				S.todo.get_all,
 				S.todo.number2completed,
@@ -1253,7 +1300,8 @@ var store={
 				operation.delete_completed,
 				operation.delete,
 				//operation.filter.set
-				operation.get.all
+				operation.get.all,
+				function(m){return m;}
 			]),
 			function(m){ return S.output.handler(m); }
 		])
@@ -1283,7 +1331,10 @@ events.backend.input.handler = pipeline.and([
 		operation.update,
 		operation.delete_completed,
 		operation.delete,
-		operation.filter.set
+		pipeline.and([
+			operation.filter.set,
+			operation.filter.reinit
+		])
 	]),
 	operation.list,
 	operation.filter.apply

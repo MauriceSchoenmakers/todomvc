@@ -358,9 +358,6 @@ var todo = {
 	}
 };
 
-
-
-
 todo.backend.list.data = function(m){
 	m.data = {};
 	m.data.count           = todo.backend.list.count;
@@ -369,9 +366,6 @@ todo.backend.list.data = function(m){
 	m.data['active-plural']= m.data.active === 1 ? '':'s';
 	return m;
 };
-
-
-
 
 todo.frontend.filter = {
 	value : '',
@@ -704,24 +698,6 @@ ui.pipeline = {
 
 (function(){
 
-//  reusable pipeline section
-var render_completed = function(create){
-	return pipeline.and([
-		db.operation.completed,
-		ui.element.toggle('item','completed','completed'),
-		
-		create ?
-		  function(m){ if(m.completed){ ++db.list.completed; } m.value = db.list.completed  > 0; return m;} // count total completed
-		: function(m){ m.value = m.completed ? ++db.list.completed : --db.list.completed; return m;}, // change a single completed flag
-		ui.element.find1('clear','#clear-completed'),
-		ui.element.toggle('clear','value','hidden',true),
-		
-		function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
-		ui.element.find1('toggle-all','#toggle-all'),
-		ui.element.value.set('toggle-all','completed-all'),
-	]);
-};
-
 db.pipeline = {
 	// if we get a post for the collection we get the item template, render it, add it to the list and finally we log the executed operation
 	create : pipeline.and([
@@ -748,11 +724,38 @@ db.pipeline = {
 		ui.item.template.render,
 		ui.item.add,
 		ui.item.find.id,
-		function(m){ m.count=++db.list.count; return m;},
 		
-		render_completed(true),
+		db.operation.completed,
+		ui.element.toggle('item','completed','completed'),
 		
 		events.backend.input.log
+	]),
+	
+	update_count : pipeline.and([
+		db.select.put,
+		db.select.url(/\/todos\/count\/?/),
+		
+		function(m){ if(!m.operation || !m.operation.body ) return; db.list.count = m.operation.body.count; m.count = db.list.count; return m;},
+		function(m){ if(!m.operation || !m.operation.body ) return; db.list.completed = m.operation.body.completed; return m;},
+		
+		function(m){ m['has-completed'] = (db.list.completed > 0) ; return m;},
+		ui.element.find1('clear','#clear-completed'),
+		ui.element.toggle('clear','has-completed','hidden',true),
+		
+		function(m){ m['completed-all'] = db.list.completed===db.list.count  ; return m;},
+		ui.element.find1('toggle-all','#toggle-all'),
+		ui.element.value.set('toggle-all','completed-all'),
+		
+		ui.element.find1('footer','#footer'),
+		ui.element.toggle('footer','count','hidden',true),
+		ui.element.find1('main','#main'),
+		ui.element.toggle('main','count','hidden',true),
+		
+		db.list.data,
+		ui.element.find1('footer','#footer'),
+		ui.footer.render,
+		
+		events.backend.input.log,
 	]),
 	
 	update : pipeline.and([
@@ -764,7 +767,6 @@ db.pipeline = {
 		ui.scroll.item.insert,
 		ui.scroll.item.first.get,
 		ui.scroll.item.last.get,
-		
 		
 		pipeline.or([
 			pipeline.and([
@@ -804,9 +806,8 @@ db.pipeline = {
 		ui.item.add,
 		ui.item.find.id,
 		
-		function(m){ m.count=++db.list.count; return m;},
-		
-		render_completed(true),
+		db.operation.completed,
+		ui.element.toggle('item','completed','completed'),
 		
 		events.backend.input.log
 	]),
@@ -816,7 +817,8 @@ db.pipeline = {
 		db.select.url(/\/todos\/([^\/]+)\/completed$/,['id']),
 		ui.item.find.id,
 		
-		render_completed(),
+		db.operation.completed,
+		ui.element.toggle('item','completed','completed'),
 		
 		events.backend.input.log
 	]),
@@ -830,10 +832,6 @@ db.pipeline = {
 		ui.item.find.all,
 		ui.element.toggle('items','completed','completed'),
 		
-		function(m){ m.value = m.completed ? (db.list.completed=db.list.count) : (db.list.completed=0) ; return m;}, // total completed
-		ui.element.find1('clear','#clear-completed','clear'),
-		ui.element.toggle('clear','value','hidden',true),
-		
 		events.backend.input.log
 	]),
 	
@@ -842,6 +840,7 @@ db.pipeline = {
 		db.select.url(/\/todos\/([^\/]+)\/title$/,['id']),
 		ui.item.find.id,
 		ui.item.template.render,
+		
 		events.backend.input.log
 	]),
 	
@@ -850,11 +849,6 @@ db.pipeline = {
 		db.select.url(/\/todos\/completed$/),
 		ui.item.find.completed,
 		ui.element.remove('items'),
-		function(m){ m.count = db.list.count-db.list.completed; return m;},
-		
-		function(m){ m.value = db.list.completed=0; return m;},
-		ui.element.find1('clear','#clear-completed'),
-		ui.element.toggle('clear','value','hidden',true),
 		
 		events.backend.input.log
 	]),
@@ -865,16 +859,12 @@ db.pipeline = {
 		ui.item.find.id,
 		
 		ui.element.find1('toggle','input.toggle','item'),
-		function(m){ if(m.toggle && m.toggle.checked) m.value = --db.list.completed; return m;}, // total completed
-		ui.element.find1('clear','#clear-completed'),
-		ui.element.toggle('clear','value','hidden',true),
 		
 		ui.element.remove('item'),
 		
-		function(m){ m.count=--db.list.count; return m;},
 		events.backend.input.log
 	]),
-	
+	/*
 	list : pipeline.or([
 		pipeline.and([
 			ui.element.find1('footer','#footer'),
@@ -890,7 +880,7 @@ db.pipeline = {
 		]),
 		function(m){ return m;} // always continue
 	]),
-	
+	*/
 	filter : {
 		set: pipeline.and([
 			db.select.put,
@@ -960,7 +950,7 @@ db.pipeline = {
 var once = function(f){
 	var called = false;
 	return function(){
-		if(!called && f){ called = true; f.apply(this,arguments); }
+		if(!called && f){ called = true; return f.apply(this,arguments); }
 	};
 };
 var cbx = function(cb,msg,debug){
@@ -982,8 +972,42 @@ var tx_handle = function(tx,cb,msg,debug){
 	if(!tx.onerror)    tx.onerror    = function(e){ cbx(cb,msg+' transaction error:'+tx.error,debug)(tx.error,null); };
 };
 
+var transaction=function(type,name,f,debug){
+	return function(){ // has arguments (....,cb,tx)
+		//debugger;
+		var
+			self   = this,
+			args   = Array.prototype.slice.call(arguments),
+			l      = args.length,
+			cb     = null,
+			tx     = (l > 0 ? args[l-1] : null);
+		
+		if(tx && typeof(tx)==='function'){
+			cb = tx;
+			tx = null;
+			args[l++]=null;
+		} else {
+			cb = (l > 1 ? args[l-2] : null);
+			if( cb && typeof(cb)!=='function') cb=null;
+		}
+		
+		cb=once(cb);
+		if(l>1) args[l-2] = cb;
+		
+		if(!tx){
+			tx = self.db.transaction(['todos'], type );
+			tx_handle(tx,cb,name,debug);
+			if(l>0) args[l-1]=tx;
+		}
+		
+		return f.apply(self,args);
+	};
+};
+var tx_write = function(name,f,debug){ return transaction.call(this,'readwrite',name,f,debug); };
+var tx_read  = function(name,f,debug){ return transaction.call(this,'readonly' ,name,f,debug); };
+
 var store={
-	db  : null,
+	db   : null,
 	init : function(cb){
 		var self = this;
 		if(self.db){ cb(null,self); return; }
@@ -1012,16 +1036,8 @@ var store={
 		r_handle(r,cb,'remove');
 	},
 	
-	add: function(todo,cb){
-		cb = once(cb);
-		var
-			self  = this,
-			tx    = self.db.transaction(['todos'], 'readwrite');
-		tx.oncomplete = function() {
-			cb(null,todo);
-		};
-		tx_handle(tx,cb,'add');
-		
+	add: tx_write('add',function(todo,cb,tx){
+		tx.oncomplete = function(){ cb(null,todo); };
 		var
 			store = tx.objectStore('todos'),
 			r = store.add(todo);
@@ -1030,25 +1046,92 @@ var store={
 				store.put(todo); // to update index as id is part of the index
 			};
 			r_handle(r,cb,'add',true);
-	},
+	}),
 	
-	put: function(todo,cb){
-		cb = once(cb);
-		var
-			self  = this,
-			tx    = self.db.transaction(['todos'], 'readwrite');
-		tx.oncomplete = function() {
-			cb(null,todo);
-		};
-		tx_handle(tx,cb,'put');
-		
+	put: tx_write('put', function(todo,cb,tx){
+		tx.oncomplete = function(){ cb(null,todo); };
 		var
 			store = tx.objectStore('todos'),
 			r = store.put(todo);
-	},
+	}),
+	
+	get: tx_read('get',function(id,cb,tx){
+		var todo  = null;
+		tx.oncomplete = function(){ cb(null,todo); };
+		
+		var
+			store = tx.objectStore('todos'),
+			r = store.get(parseInt(id));
+		
+		r.onsuccess = function(e) { todo=e.target.result; };
+		r_handle(r,cb,'get');
+	}),
+	
+	delete: tx_write('delete',function(id,cb,tx){
+		tx.oncomplete = function(){ cb(null,id); };
+		var
+			store = tx.objectStore('todos'),
+			r = store.delete(parseInt(id));
+	}),
+	
+	delete_completed: tx_write('delete completed',function(cb,tx){
+		var self=this;
+		self.get_all(null,null,-1,'completed',function(err,results){
+			if(err||!results){ cb(err,null); return; }
+			results(function(value,next,request){
+				if(!value || !request || !request.result){ cb(null,true); return; }
+				
+				var r = request.result.delete();
+				r.onsuccess = function(e) { next && next(); };
+				r_handle(r,cb,'delete completed');
+			});
+		},tx);
+	}),
+	
+	all_completed: tx_write('all completed',function(completed,cb,tx){
+		var self=this;
+		self.get_all(null,null,-1,completed?'active':'completed',function(err,results){
+			if(err||!results){ cb(err,null); return; }
+			results(function(value,next,request){
+				//debugger;
+				if(!value || !request || !request.result){ cb(null,true); return; }
+				value.completed = completed;
+				var r = request.result.update(value);
+				r.onsuccess = function(e) { next && next(); };
+				r_handle(r,cb,'all completed');
+			});
+		},tx);
+	}),
+	
+	get_all: tx_read('get all',function(after_id,before_id,limit,filter,cb,tx){           // /todos/all?from=id&limit=20
+		
+		var direction = !after_id && before_id ? 'prevunique' : 'nextunique';
+		
+		after_id  = after_id || 0;
+		before_id = before_id || Number.MAX_VALUE;
+		if(filter==='all') filter = null;
+		
+		tx.oncomplete = function(){ cb(null,null); };
+		
+		var
+			store = tx.objectStore('todos'),
+			index = !filter ? store : store.index('completed_id'),
+			lower = !filter ? after_id  : [filter==='completed'?1:0,after_id ],
+			upper = !filter ? before_id : [filter==='completed'?1:0,before_id],
+			range = window.IDBKeyRange.bound(lower,upper, true, true); // exclude lower/upper
+		
+		this.index(index,range,direction,function(err,results){
+			if(err||!results){ cb(err,null); return; }
+			cb(null,function(f){
+				results(function(v,next,r){
+					if(limit!==-1 && (--limit)===0 ){ f(v,null,r); return; }
+					f(v,next,r);
+				});
+			});
+		});
+	}),
 	
 	index:function(index, range, direction, cb){ // loop over an index using a range, we return a function as iterator
-		cb=once(cb);
 		if(!direction) direction = 'nextunique';
 		var
 			self  = this,
@@ -1074,96 +1157,33 @@ var store={
 		};
 		r_handle(r,cb,'index');
 	},
-	get:function(id, cb){
-		//id=parseInt(id);
-		cb=once(cb);
+	
+	count: tx_read('count',function(cb,tx){
 		var
-			self  = this,
-			todo  = null,
-			tx    = self.db.transaction(['todos'],'readonly');
-		tx.oncomplete = function() { cb(null,todo); };
-		tx_handle(tx,cb,'get');
+			self   = this,
+			store  = tx.objectStore('todos'),
+			index  = store.index('completed_id'),
+			counts = null;
 		
-		var
-			store = tx.objectStore('todos'),
-			r = store.get(parseInt(id));
-		r.onsuccess = function(e) {
-			todo=e.target.result;
+		tx.oncomplete = function(){ cb(null,counts); };
+		
+		// count all
+		var r_count = index.count();
+		r_count.onsuccess = function(e){
+			var count = r_count.result;
+			
+			// count completed
+			var range = window.IDBKeyRange.bound([1,0],[1,Number.MAX_VALUE]); // include lower/upper
+			var r_completed = index.count(range);
+			r_completed.onsuccess = function(e){
+				var completed = r_completed.result;
+				counts = {count:count, completed:completed };
+			};
+			r_handle(r_completed,cb,'count completed');
+		
 		};
-		r_handle(r,cb,'get');
-	},
-	delete:function(id, cb){
-		cb=once(cb);
-		var
-			self  = this,
-			tx    = self.db.transaction(['todos'],'readwrite');
-		tx.oncomplete = function() { cb(null,id); };
-		tx_handle(tx,cb,'delete');
-		var
-			store = tx.objectStore('todos'),
-			r = store.delete(parseInt(id));
-	},
-	delete_completed:function(cb){
-		cb=once(cb);
-		var self=this;
-		self.get_all(null,null,-1,'completed',true,function(err,results){
-			if(err||!results){ cb(err,null); return; }
-			results(function(value,next,request){
-				if(!value || !request || !request.result){ cb(null,true); return; }
-				
-				var r = request.result.delete();
-				r.onsuccess = function(e) { next && next(); };
-				r_handle(r,cb,'delete completed');
-			});
-		});
-	},
-	all_completed:function(completed,cb){
-		cb=once(cb);
-		var self=this;
-		self.get_all(null,null,-1,completed ? 'active' : 'completed',true,function(err,results){
-			if(err||!results){ cb(err,null); return; }
-			results(function(value,next,request){
-				//debugger;
-				if(!value || !request || !request.result){ cb(null,true); return; }
-				value.completed = completed;
-				var r = request.result.update(value);
-				r.onsuccess = function(e) { next && next(); };
-				r_handle(r,cb,'all completed');
-			});
-		});
-	},
-	get_all:function(after_id,before_id,limit,filter,write,cb){           // /todos/all?from=id&limit=20
-		cb=once(cb);
-		
-		var direction = !after_id && before_id ? 'prevunique' : 'nextunique';
-		
-		after_id  = after_id || 0;
-		before_id = before_id || Number.MAX_VALUE;
-		if(filter==='all') filter = null;
-		
-		var
-			self  = this,
-			tx    = self.db.transaction(['todos'], write ? 'readwrite':'readonly');
-		tx.oncomplete = function() { cb(null,null); };
-		tx_handle(tx,cb,'get_all');
-		
-		var
-			store = tx.objectStore('todos'),
-			index = !filter ? store : store.index('completed_id'),
-			lower = !filter ? after_id  : [filter==='completed'?1:0,after_id ],
-			upper = !filter ? before_id : [filter==='completed'?1:0,before_id],
-			range = window.IDBKeyRange.bound(lower,upper, true, true); // exclude lower/uper
-		
-		self.index(index,range,direction,function(err,results){
-			if(err||!results){ cb(err,null); return; }
-			cb(null,function(f){
-				results(function(v,next,r){
-					if(limit!==-1 && (--limit)===0 ){ f(v,null,r); return; }
-					f(v,next,r);
-				});
-			});
-		});
-	}
+		r_handle(r_count,cb,'count all');
+	})
 };
 ///////////////////////////////////////////////////////////
 
@@ -1173,21 +1193,21 @@ var store={
 		init            : function(m,cb){ S.init(function(err){cb(err,m);}); },
 		completed2number: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed ? 1 : 0; } return m; },
 		number2completed: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed === 1;   } return m; },
-		add             : function(m,cb){ S.add(m.todo||m.operation.body,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
-		put             : function(m,cb){ S.put(m.todo||m.operation.body,function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
-		get             : function(m,cb){ S.get(m.id   ||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
-		delete          : function(m,cb){ S.delete(m.id||m.operation.body.id,function(e,id){ cb(e,m);}); },
+		
+		post            : function(m,cb){ S.add(m.todo ||m.operation.body,   function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
+		put             : function(m,cb){ S.put(m.todo ||m.operation.body,   function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
+		delete          : function(m,cb){ S.delete(m.id||m.operation.body.id,function(e,id  ){ cb(e,m);}); },
 		delete_completed: function(m,cb){ S.delete_completed(function(e){ cb(e,m);}); },
 		all_completed   : function(m,cb){ S.all_completed(m.completed,function(e){ cb(e,m);}); },
+		get             : function(m,cb){ S.get(m.id||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
 		get_all         : function(m,cb){
 			m.query = m.query || {};
 			var
 				from = m.query.from ? parseInt(m.query.from) : null,
 				to   = m.query.to   ? parseInt(m.query.to)   : null,
 				limit= m.query.limit? parseInt(m.query.limit): null;
-			console.log(m.filter);
-			S.get_all(from,to,limit,m.filter,false,function(err,results){
-				
+			
+			S.get_all(from,to,limit,m.filter,function(err,results){
 				if(err || !results){ cb(err,m); return; }
 				
 				// callback called for each found element
@@ -1203,6 +1223,19 @@ var store={
 					next && next();
 				});
 			});
+		},
+		count : function F(m,cb){
+			cb(null,m);
+			
+			S.count(function (err,counts){
+				// send counts only if changed
+				
+				if( F.previous && F.previous.count === counts.count && F.previous.completed === counts.completed) return;
+				
+				F.previous = counts;
+				
+				cb(null,{operation : { method: 'put', url: '/todos/count' , body: counts }});
+			});
 		}
 	};
 	
@@ -1213,8 +1246,9 @@ var store={
 			db.select.url(/\/todos\/?$/),
 			// db.operation.add_id, done by auto increment
 			S.todo.completed2number,
-			S.todo.add,
+			S.todo.post,
 			S.todo.number2completed,
+			S.todo.count
 		]),
 		
 		completed: pipeline.and([
@@ -1226,6 +1260,7 @@ var store={
 			function(m){ m.todo.completed = m.completed; return m;},
 			S.todo.put,
 			S.todo.number2completed,
+			S.todo.count
 		]),
 		
 		all_completed: pipeline.and([
@@ -1235,6 +1270,7 @@ var store={
 			db.operation.completed,
 			S.todo.all_completed,
 			S.todo.number2completed,
+			S.todo.count
 		]),
 		
 		title: pipeline.and([
@@ -1244,13 +1280,15 @@ var store={
 			S.todo.get,
 			function(m){ m.todo.title = m.title; return m;},
 			S.todo.put
+			// no count as a title change doesn't change counts
 		]),
 		
 		
 		delete_completed: pipeline.and([
 			db.select.delete,
 			db.select.url(/\/todos\/completed$/),
-			S.todo.delete_completed
+			S.todo.delete_completed,
+			S.todo.count
 		]),
 		
 		
@@ -1258,6 +1296,7 @@ var store={
 			db.select.delete,
 			db.select.url(/\/todos\/([^\/]+)$/,['id']),
 			S.todo.delete,
+			S.todo.count
 		]),
 		
 		
@@ -1275,6 +1314,7 @@ var store={
 				url.query,
 				S.todo.get_all,
 				S.todo.number2completed,
+				S.todo.count, // do count before, to not do a count on each retrieved element but just once
 			]),
 			/*
 			id : pipeline.and([
@@ -1328,6 +1368,7 @@ events.backend.input.handler = pipeline.and([
 		operation.completed,
 		operation.all_completed,
 		operation.title,
+		operation.update_count,
 		operation.update,
 		operation.delete_completed,
 		operation.delete,
@@ -1336,7 +1377,7 @@ events.backend.input.handler = pipeline.and([
 			operation.filter.reinit
 		])
 	]),
-	operation.list,
+	//operation.list,  doune by update_count ....
 	operation.filter.apply
 ]);
 

@@ -530,6 +530,15 @@ var pipeline = {
 pipeline.and = pipeline.call.bind(pipeline,true);
 pipeline.or  = pipeline.call.bind(pipeline,false);
 
+pipeline.split=function(array1,array2){
+	var arrays = arguments;
+	return function(m,cb){
+		for(var i=0,l=arrays.length;i<l;i++){
+			pipeline.and(arrays[i])(m,cb);
+		}
+	};
+};
+
 var ui = todo.frontend;
 var db = todo.backend;
 
@@ -1225,7 +1234,6 @@ var store={
 			});
 		},
 		count : function F(m,cb){
-			cb(null,m);
 			
 			S.count(function (err,counts){
 				// send counts only if changed
@@ -1248,7 +1256,9 @@ var store={
 			S.todo.completed2number,
 			S.todo.post,
 			S.todo.number2completed,
-			S.todo.count
+			pipeline.split([ ],[
+				S.todo.count
+			])
 		]),
 		
 		completed: pipeline.and([
@@ -1260,7 +1270,9 @@ var store={
 			function(m){ m.todo.completed = m.completed; return m;},
 			S.todo.put,
 			S.todo.number2completed,
-			S.todo.count
+			pipeline.split([ ],[
+				S.todo.count
+			])
 		]),
 		
 		all_completed: pipeline.and([
@@ -1270,7 +1282,10 @@ var store={
 			db.operation.completed,
 			S.todo.all_completed,
 			S.todo.number2completed,
-			S.todo.count
+			pipeline.split([
+			],[
+				S.todo.count
+			])
 		]),
 		
 		title: pipeline.and([
@@ -1288,7 +1303,9 @@ var store={
 			db.select.delete,
 			db.select.url(/\/todos\/completed$/),
 			S.todo.delete_completed,
-			S.todo.count
+			pipeline.split([ ],[
+				S.todo.count
+			])
 		]),
 		
 		
@@ -1296,9 +1313,10 @@ var store={
 			db.select.delete,
 			db.select.url(/\/todos\/([^\/]+)$/,['id']),
 			S.todo.delete,
-			S.todo.count
+			pipeline.split([ ],[
+				S.todo.count
+			]),
 		]),
-		
 		
 		/*filter : {
 			set: pipeline.and([
@@ -1312,9 +1330,12 @@ var store={
 				db.select.get,
 				db.select.url(/\/todos\/(completed|active)?(\?|$)/,['filter']),
 				url.query,
-				S.todo.get_all,
-				S.todo.number2completed,
-				S.todo.count, // do count before, to not do a count on each retrieved element but just once
+				pipeline.split([
+						S.todo.get_all,
+						S.todo.number2completed
+				],[
+					S.todo.count
+				])
 			]),
 			/*
 			id : pipeline.and([

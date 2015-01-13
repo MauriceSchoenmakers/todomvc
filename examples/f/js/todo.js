@@ -1196,7 +1196,6 @@ var store={
 		r_handle(r_completed,cb,'count completed');
 		
 		tx.oncomplete = function(){
-			if(r_count.result===0) debugger;
 			cb(null, {count:r_count.result, completed:r_completed.result });
 		};
 	})
@@ -1313,16 +1312,17 @@ var store={
 			// no count as a title change doesn't change counts
 		]),
 		
-		
 		delete_completed: pipeline.and([
 			db.select.delete,
 			db.select.url(/\/todos\/completed$/),
 			S.todo.delete_completed,
-			pipeline.split([ ],[
+			pipeline.split([
+				function(m){ console.log('forward'); return m;}
+			],[
+				function(m){ console.log('count'); return m;},
 				S.todo.count
 			])
 		]),
-		
 		
 		delete: pipeline.and([
 			db.select.delete,
@@ -1366,7 +1366,6 @@ var store={
 				operation.title,
 				operation.delete_completed,
 				operation.delete,
-				//operation.filter.set
 				operation.get.all,
 				operation.get.id,
 				function(m){return m;}

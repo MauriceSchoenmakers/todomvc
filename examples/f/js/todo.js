@@ -1307,7 +1307,7 @@ var store={
 			db.select.put,
 			db.select.url(/\/todos\/([^\/]+)\/title$/,['id']),
 			db.operation.title,
-			S.todo.get,
+			S.todo.read,
 			function(m){ m.todo.title = m.title; return m;},
 			S.todo.put
 			// no count as a title change doesn't change counts
@@ -1332,13 +1332,6 @@ var store={
 				S.todo.count
 			]),
 		]),
-		
-		/*filter : {
-			set: pipeline.and([
-				db.select.put,
-				db.select.url(/\/todos$/)
-			])
-		},*/
 		
 		get : {
 			all : pipeline.and([

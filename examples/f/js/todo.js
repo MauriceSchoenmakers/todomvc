@@ -352,6 +352,12 @@ var todo = {
 					};
 					m.properties.operation=true;
 					return m;
+				},
+				id : function(m){
+					if(!m.id) return m;
+					m.operation = { method: 'get', url: '/todos/'+encodeURI(m.id) };
+					m.properties.operation=true;
+					return m;
 				}
 			}
 		}
@@ -657,8 +663,15 @@ ui.pipeline = {
 			pipeline.and([
 				ui.scroll.select.init,
 				function(m,cb){ // we split up the event in two (subsequent) events, (we call the cb twice)
-					var m_down={},m_up={};
-					for(var p in m){ m_down[p]=m[p]; m_up[p]=m[p]; }
+					var m_down={},m_up={},m_position={};
+					for(var p in m){ m_down[p]=m[p]; m_up[p]=m[p]; m_position[p]=m[p]; }
+					
+					if(m.position){ // single get
+						pipeline.and([
+							function(m){m.id=m.position;return m;},
+							db.operation.get.id
+						])(m_position,cb);
+					}
 					
 					pipeline.and([
 						function(m){m.from=m.position;return m;},
@@ -1169,29 +1182,23 @@ var store={
 	
 	count: tx_read('count',function(cb,tx){
 		var
-			self   = this,
-			store  = tx.objectStore('todos'),
-			index  = store.index('completed_id'),
-			counts = null;
-		
-		tx.oncomplete = function(){ cb(null,counts); };
+			self  = this,
+			store = tx.objectStore('todos'),
+			index = store.index('completed_id'),
+			range = window.IDBKeyRange.bound([1,0],[1,Number.MAX_VALUE]); // include lower/upper
 		
 		// count all
-		var r_count = index.count();
-		r_count.onsuccess = function(e){
-			var count = r_count.result;
-			
-			// count completed
-			var range = window.IDBKeyRange.bound([1,0],[1,Number.MAX_VALUE]); // include lower/upper
-			var r_completed = index.count(range);
-			r_completed.onsuccess = function(e){
-				var completed = r_completed.result;
-				counts = {count:count, completed:completed };
-			};
-			r_handle(r_completed,cb,'count completed');
-		
-		};
+		var r_count = store.count(), r_completed = index.count(range);
+		r_count.onsuccess = function(e){};
 		r_handle(r_count,cb,'count all');
+		
+		r_completed.onsuccess = function(e){};
+		r_handle(r_completed,cb,'count completed');
+		
+		tx.oncomplete = function(){
+			if(r_count.result===0) debugger;
+			cb(null, {count:r_count.result, completed:r_completed.result });
+		};
 	})
 };
 ///////////////////////////////////////////////////////////
@@ -1204,11 +1211,20 @@ var store={
 		number2completed: function(m){ var tmp; if((tmp=m)&&(tmp=tmp.operation)&&(tmp=tmp.body)){ tmp.completed = tmp.completed === 1;   } return m; },
 		
 		post            : function(m,cb){ S.add(m.todo ||m.operation.body,   function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
+		read            : function(m,cb){ S.get(m.id||m.operation.body.id,   function(e,todo){ m.todo=todo; cb(e,m);}); },
 		put             : function(m,cb){ S.put(m.todo ||m.operation.body,   function(e,todo){ m.todo=todo; if(m.operation && m.operation.body) m.operation.body=todo; cb(e,m); }); },
 		delete          : function(m,cb){ S.delete(m.id||m.operation.body.id,function(e,id  ){ cb(e,m);}); },
 		delete_completed: function(m,cb){ S.delete_completed(function(e){ cb(e,m);}); },
 		all_completed   : function(m,cb){ S.all_completed(m.completed,function(e){ cb(e,m);}); },
-		get             : function(m,cb){ S.get(m.id||m.operation.body.id,function(e,todo){ m.todo=todo; cb(e,m);}); },
+		get             : function(m,cb){
+			var id = m.id||m.operation.body.id;
+			S.get(id,function(e,todo){
+				if(e || !todo ){ cb(e,todo); return; }
+				m={};
+				m.operation = { method: 'put', url: '/todos/'+encodeURI(id) , body: todo };
+				cb(null,m);
+			});
+		},
 		get_all         : function(m,cb){
 			m.query = m.query || {};
 			var
@@ -1239,7 +1255,6 @@ var store={
 				// send counts only if changed
 				
 				if( F.previous && F.previous.count === counts.count && F.previous.completed === counts.completed) return;
-				
 				F.previous = counts;
 				
 				cb(null,{operation : { method: 'put', url: '/todos/count' , body: counts }});
@@ -1266,7 +1281,7 @@ var store={
 			db.select.url(/\/todos\/([^\/]+)\/completed$/,['id']),
 			S.todo.completed2number,
 			db.operation.completed,
-			S.todo.get,
+			S.todo.read,
 			function(m){ m.todo.completed = m.completed; return m;},
 			S.todo.put,
 			S.todo.number2completed,
@@ -1331,20 +1346,18 @@ var store={
 				db.select.url(/\/todos\/(completed|active)?(\?|$)/,['filter']),
 				url.query,
 				pipeline.split([
-						S.todo.get_all,
-						S.todo.number2completed
+					S.todo.get_all,
+					S.todo.number2completed
 				],[
 					S.todo.count
 				])
 			]),
-			/*
 			id : pipeline.and([
 				db.select.get,
 				db.select.url(/\/todos\/([^\/]+)$/,['id']),
 				S.todo.get,
 				S.todo.number2completed,
 			])
-			*/
 		}
 	};
 	
@@ -1362,6 +1375,7 @@ var store={
 				operation.delete,
 				//operation.filter.set
 				operation.get.all,
+				operation.get.id,
 				function(m){return m;}
 			]),
 			function(m){ return S.output.handler(m); }
@@ -1387,12 +1401,12 @@ events.backend.input.handler = pipeline.and([
 	pipeline.or([
 		operation.create,
 		operation.completed,
-		operation.all_completed,
-		operation.title,
 		pipeline.and([
-			operation.update_count,
+			operation.all_completed,
 			operation.filter.reinit
 		]),
+		operation.title,
+		operation.update_count,
 		operation.update,
 		operation.delete_completed,
 		operation.delete,

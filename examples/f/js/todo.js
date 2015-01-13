@@ -1389,7 +1389,10 @@ events.backend.input.handler = pipeline.and([
 		operation.completed,
 		operation.all_completed,
 		operation.title,
-		operation.update_count,
+		pipeline.and([
+			operation.update_count,
+			operation.filter.reinit
+		]),
 		operation.update,
 		operation.delete_completed,
 		operation.delete,

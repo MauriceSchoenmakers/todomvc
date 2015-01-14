@@ -1019,6 +1019,7 @@ var transaction=function(type,name,f,debug){
 		if(!tx){
 			tx = self.db.transaction(['todos'], type );
 			tx_handle(tx,cb,name,debug);
+			tx.oncomplete=null;
 			if(l>0) args[l-1]=tx;
 		}
 		
@@ -1139,7 +1140,7 @@ var store={
 		before_id = before_id || Number.MAX_VALUE;
 		if(filter==='all') filter = null;
 		
-		if(!tx.oncomplete) tx.complete = function(){ cb(null,null); };
+		if(!tx.oncomplete) tx.oncomplete = function(){ cb(null,null); };
 		
 		var
 			store = tx.objectStore('todos'),

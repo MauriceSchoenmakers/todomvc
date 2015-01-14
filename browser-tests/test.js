@@ -68,13 +68,13 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 			});
 		}
 
-		test.xdescribe('When page is initially opened', function () {
+		test.describe('When page is initially opened', function () {
 			test.it('should focus on the todo input field', function () {
 				testOps.assertFocussedElementId('new-todo');
 			});
 		});
 
-		test.xdescribe('No Todos', function () {
+		test.describe('No Todos', function () {
 			test.it('should hide #main and #footer', function () {
 				testOps.assertItemCount(0);
 				testOps.assertMainSectionIsHidden();
@@ -82,7 +82,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 			});
 		});
 
-		test.xdescribe('New Todo', function () {
+		test.describe('New Todo', function () {
 			test.it('should allow me to add todo items', function () {
 				page.enterItem(TODO_ITEM_ONE);
 				testOps.assertItems([TODO_ITEM_ONE]);
@@ -116,7 +116,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 			});
 		});
 
-		test.xdescribe('Mark all as completed', function () {
+		test.describe('Mark all as completed', function () {
 			test.it('should allow me to mark all items as completed', function () {
 				createStandardItems();
 				page.clickMarkAllCompletedCheckBox();
@@ -152,7 +152,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 			});
 		});
 
-		test.xdescribe('Item', function () {
+		test.describe('Item', function () {
 			test.it('should allow me to mark items as complete', function () {
 				page.enterItem(TODO_ITEM_ONE);
 				page.enterItem(TODO_ITEM_TWO);
@@ -193,7 +193,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 			});
 		});
 
-		test.xdescribe('Editing', function () {
+		test.describe('Editing', function () {
 			test.it('should hide other controls when editing', function () {
 				createStandardItems();
 				page.doubleClickItemAtIndex(1);
@@ -251,7 +251,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 			});
 		});
 
-		test.xdescribe('Counter', function () {
+		test.describe('Counter', function () {
 			test.it('should display the current number of todo items', function () {
 				page.enterItem(TODO_ITEM_ONE);
 				testOps.assertItemCountText('1 item left');
@@ -262,7 +262,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 
 
 		test.describe('Clear completed button', function () {
-			test.xit('should display the number of completed items', function () {
+			test.it('should display the number of completed items', function () {
 				createStandardItems();
 				page.toggleItemAtIndex(1);
 				testOps.assertClearCompleteButtonText('Clear completed (1)');
@@ -270,7 +270,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 				testOps.assertClearCompleteButtonText('Clear completed (2)');
 			});
 
-			test.xit('should remove completed items when clicked', function () {
+			test.it('should remove completed items when clicked', function () {
 				createStandardItems();
 				page.toggleItemAtIndex(1);
 				page.clickClearCompleteButton();
@@ -283,8 +283,6 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 				page.toggleItemAtIndex(1);
 				testOps.assertClearCompleteButtonIsVisible();
 				page.clickClearCompleteButton();
-				browser.sleep(5000);
-				debugger;
 				testOps.assertClearCompleteButtonIsHidden();
 			});
 		});
@@ -314,7 +312,7 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 			});
 		});*/
 
-		test.xdescribe('Routing', function () {
+		test.describe('Routing', function () {
 			test.it('should allow me to display active items', function () {
 				createStandardItems();
 				page.toggleItemAtIndex(1);

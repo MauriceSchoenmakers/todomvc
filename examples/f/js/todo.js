@@ -1098,10 +1098,13 @@ var store={
 	
 	delete_completed: tx_write('delete completed',function(cb,tx){
 		var self=this;
+		
+		tx.oncomplete = function(){ cb(null,true); };
+		
 		self.get_all(null,null,-1,'completed',function(err,results){
 			if(err||!results){ cb(err,null); return; }
 			results(function(value,next,request){
-				if(!value || !request || !request.result){ cb(null,true); return; }
+				if(!value || !request || !request.result) return; // cb on complete
 				
 				var r = request.result.delete();
 				r.onsuccess = function(e) { next && next(); };
@@ -1112,11 +1115,14 @@ var store={
 	
 	all_completed: tx_write('all completed',function(completed,cb,tx){
 		var self=this;
+		
+		tx.oncomplete = function(){ cb(null,true); };
+		
 		self.get_all(null,null,-1,completed?'active':'completed',function(err,results){
 			if(err||!results){ cb(err,null); return; }
 			results(function(value,next,request){
 				//debugger;
-				if(!value || !request || !request.result){ cb(null,true); return; }
+				if(!value || !request || !request.result) return; // cb on complete
 				value.completed = completed;
 				var r = request.result.update(value);
 				r.onsuccess = function(e) { next && next(); };
@@ -1133,7 +1139,7 @@ var store={
 		before_id = before_id || Number.MAX_VALUE;
 		if(filter==='all') filter = null;
 		
-		tx.oncomplete = function(){ cb(null,null); };
+		if(!tx.oncomplete) tx.complete = function(){ cb(null,null); };
 		
 		var
 			store = tx.objectStore('todos'),
@@ -1248,14 +1254,11 @@ var store={
 				});
 			});
 		},
+		
 		count : function F(m,cb){
-			
 			S.count(function (err,counts){
-				// send counts only if changed
-				
 				if( F.previous && F.previous.count === counts.count && F.previous.completed === counts.completed) return;
 				F.previous = counts;
-				
 				cb(null,{operation : { method: 'put', url: '/todos/count' , body: counts }});
 			});
 		}
@@ -1317,9 +1320,7 @@ var store={
 			db.select.url(/\/todos\/completed$/),
 			S.todo.delete_completed,
 			pipeline.split([
-				function(m){ console.log('forward'); return m;}
 			],[
-				function(m){ console.log('count'); return m;},
 				S.todo.count
 			])
 		]),

@@ -283,6 +283,8 @@ module.exports.todoMVCTest = function (frameworkName, baseUrl, speedMode, laxMod
 				page.toggleItemAtIndex(1);
 				testOps.assertClearCompleteButtonIsVisible();
 				page.clickClearCompleteButton();
+				browser.sleep(5000);
+				debugger;
 				testOps.assertClearCompleteButtonIsHidden();
 			});
 		});
